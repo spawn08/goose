@@ -45,11 +45,6 @@
       "title": "Environment Variables",
       "toggleVisibility": "Toggle value visibility"
     },
-    "messageBranch": {
-      "next": "Next branch",
-      "page": "{{current}} of {{total}}",
-      "previous": "Previous branch"
-    },
     "plan": {
       "toggle": "Toggle plan"
     },

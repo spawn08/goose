@@ -59,6 +59,8 @@ describe("useChat", () => {
       sessionStateById: {},
       activeSessionId: null,
       isConnected: true,
+      editingMessageIdBySession: {},
+      draftsBySession: {},
     });
     useChatSessionStore.setState({
       sessions: [],
@@ -434,5 +436,400 @@ describe("useChat", () => {
         text: "Working directory missing",
       },
     ]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // retryMessage
+  // ---------------------------------------------------------------------------
+
+  describe("retryMessage", () => {
+    function seedConversation(
+      sessionId: string,
+      msgs: Array<{
+        id: string;
+        role: "user" | "assistant";
+        text: string;
+        personaId?: string;
+        personaName?: string;
+      }>,
+    ) {
+      const messages: Message[] = msgs.map((m) => ({
+        id: m.id,
+        role: m.role,
+        created: Date.now(),
+        content: [{ type: "text", text: m.text }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          ...(m.personaId
+            ? { targetPersonaId: m.personaId, targetPersonaName: m.personaName }
+            : {}),
+        },
+      }));
+      useChatStore.getState().setMessages(sessionId, messages);
+    }
+
+    it("truncates from target user message and re-sends its text", async () => {
+      mockAcpSendMessage.mockResolvedValue(undefined);
+
+      seedConversation("session-1", [
+        { id: "u1", role: "user", text: "First question" },
+        { id: "a1", role: "assistant", text: "First answer" },
+        { id: "u2", role: "user", text: "Second question" },
+        { id: "a2", role: "assistant", text: "Second answer" },
+      ]);
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      await act(async () => {
+        await result.current.retryMessage("u2");
+      });
+
+      // History should be truncated to just the first exchange, then a new user
+      // message appended by sendMessage.
+      const messages = useChatStore.getState().messagesBySession["session-1"];
+      // u1, a1 survive the truncation; sendMessage adds a new user message
+      expect(messages.length).toBeGreaterThanOrEqual(3);
+      expect(messages[0].id).toBe("u1");
+      expect(messages[1].id).toBe("a1");
+      // The third message is the re-sent user message (new id)
+      expect(messages[2].role).toBe("user");
+      expect(messages[2].content[0]).toEqual({
+        type: "text",
+        text: "Second question",
+      });
+
+      expect(mockAcpSendMessage).toHaveBeenCalledWith(
+        "session-1",
+        "goose",
+        "Second question",
+        expect.objectContaining({ personaId: undefined }),
+      );
+    });
+
+    it("preserves persona when retrying a persona-targeted message", async () => {
+      mockAcpSendMessage.mockResolvedValue(undefined);
+
+      seedConversation("session-1", [
+        {
+          id: "u1",
+          role: "user",
+          text: "Hello persona",
+          personaId: "persona-a",
+          personaName: "Persona A",
+        },
+        { id: "a1", role: "assistant", text: "Hi there" },
+      ]);
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      await act(async () => {
+        await result.current.retryMessage("u1");
+      });
+
+      expect(mockAcpSendMessage).toHaveBeenCalledWith(
+        "session-1",
+        "goose",
+        "Hello persona",
+        expect.objectContaining({
+          personaId: "persona-a",
+          personaName: "Persona A",
+        }),
+      );
+    });
+
+    it("handles retrying an assistant message by finding the preceding user message", async () => {
+      mockAcpSendMessage.mockResolvedValue(undefined);
+
+      seedConversation("session-1", [
+        { id: "u1", role: "user", text: "My question" },
+        { id: "a1", role: "assistant", text: "My answer" },
+      ]);
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      await act(async () => {
+        await result.current.retryMessage("a1");
+      });
+
+      // Truncation should start from u1 (the preceding user message)
+      const messages = useChatStore.getState().messagesBySession["session-1"];
+      // Only the re-sent user message should remain (u1 and a1 were truncated)
+      expect(messages[0].role).toBe("user");
+      expect(messages[0].content[0]).toEqual({
+        type: "text",
+        text: "My question",
+      });
+      expect(mockAcpSendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("guards against retrying while streaming", async () => {
+      seedConversation("session-1", [
+        { id: "u1", role: "user", text: "Hello" },
+        { id: "a1", role: "assistant", text: "World" },
+      ]);
+      useChatStore.getState().setChatState("session-1", "streaming");
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      await act(async () => {
+        await result.current.retryMessage("u1");
+      });
+
+      // Messages should be untouched — retry was blocked
+      const messages = useChatStore.getState().messagesBySession["session-1"];
+      expect(messages).toHaveLength(2);
+      expect(mockAcpSendMessage).not.toHaveBeenCalled();
+    });
+
+    it("guards against retrying while thinking", async () => {
+      seedConversation("session-1", [
+        { id: "u1", role: "user", text: "Hello" },
+      ]);
+      useChatStore.getState().setChatState("session-1", "thinking");
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      await act(async () => {
+        await result.current.retryMessage("u1");
+      });
+
+      const messages = useChatStore.getState().messagesBySession["session-1"];
+      expect(messages).toHaveLength(1);
+      expect(mockAcpSendMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // editMessage
+  // ---------------------------------------------------------------------------
+
+  describe("editMessage", () => {
+    it("sets editing state for a user message", () => {
+      const userMsg: Message = {
+        id: "u1",
+        role: "user",
+        created: Date.now(),
+        content: [{ type: "text", text: "Hello" }],
+        metadata: { userVisible: true, agentVisible: true },
+      };
+      useChatStore.getState().setMessages("session-1", [userMsg]);
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      act(() => {
+        result.current.editMessage("u1");
+      });
+
+      expect(result.current.editingMessageId).toBe("u1");
+    });
+
+    it("guards against entering edit mode while streaming", () => {
+      const userMsg: Message = {
+        id: "u1",
+        role: "user",
+        created: Date.now(),
+        content: [{ type: "text", text: "Hello" }],
+        metadata: { userVisible: true, agentVisible: true },
+      };
+      useChatStore.getState().setMessages("session-1", [userMsg]);
+      useChatStore.getState().setChatState("session-1", "streaming");
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      act(() => {
+        result.current.editMessage("u1");
+      });
+
+      expect(result.current.editingMessageId).toBeNull();
+    });
+
+    it("refuses to edit an assistant message", () => {
+      const assistantMsg: Message = {
+        id: "a1",
+        role: "assistant",
+        created: Date.now(),
+        content: [{ type: "text", text: "Hello" }],
+        metadata: { userVisible: true, agentVisible: true },
+      };
+      useChatStore.getState().setMessages("session-1", [assistantMsg]);
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      act(() => {
+        result.current.editMessage("a1");
+      });
+
+      expect(result.current.editingMessageId).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // cancelEdit
+  // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // retryMessage — attachment & image-only edge cases
+  // ---------------------------------------------------------------------------
+
+  describe("retryMessage edge cases", () => {
+    it("does not truncate history when retrying an image-only message (no text)", async () => {
+      // Seed a user message that has only image content, no text
+      const imageOnlyMsg: Message = {
+        id: "img-1",
+        role: "user",
+        created: Date.now(),
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              mediaType: "image/png",
+              data: "iVBORw0KGgo=",
+            },
+          },
+        ],
+        metadata: { userVisible: true, agentVisible: true },
+      };
+      const assistantReply: Message = {
+        id: "a1",
+        role: "assistant",
+        created: Date.now(),
+        content: [{ type: "text", text: "I see the image" }],
+        metadata: { userVisible: true, agentVisible: true },
+      };
+      useChatStore
+        .getState()
+        .setMessages("session-1", [imageOnlyMsg, assistantReply]);
+      mockAcpSendMessage.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      await act(async () => {
+        await result.current.retryMessage("img-1");
+      });
+
+      // The image-only message should be retried (not silently dropped).
+      // sendMessage should have been called with the image attachment.
+      expect(mockAcpSendMessage).toHaveBeenCalledTimes(1);
+      // The re-sent message should carry the image
+      expect(mockAcpSendMessage).toHaveBeenCalledWith(
+        "session-1",
+        "goose",
+        expect.any(String),
+        expect.objectContaining({
+          images: [[expect.any(String), "image/png"]],
+        }),
+      );
+    });
+
+    it("preserves file attachments when retrying a message", async () => {
+      mockAcpSendMessage.mockResolvedValue(undefined);
+
+      const msgWithAttachments: Message = {
+        id: "u1",
+        role: "user",
+        created: Date.now(),
+        content: [{ type: "text", text: "Check this file" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          attachments: [
+            { type: "file", name: "report.pdf", path: "/tmp/report.pdf" },
+            { type: "directory", name: "src", path: "/tmp/src" },
+          ],
+        },
+      };
+      useChatStore.getState().setMessages("session-1", [msgWithAttachments]);
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      await act(async () => {
+        await result.current.retryMessage("u1");
+      });
+
+      // The re-sent user message should carry the original attachments
+      const messages = useChatStore.getState().messagesBySession["session-1"];
+      const reSent = messages.find((m) => m.role === "user");
+      expect(reSent?.metadata?.attachments).toEqual([
+        expect.objectContaining({
+          type: "file",
+          name: "report.pdf",
+          path: "/tmp/report.pdf",
+        }),
+        expect.objectContaining({
+          type: "directory",
+          name: "src",
+          path: "/tmp/src",
+        }),
+      ]);
+    });
+
+    it("preserves image content blocks when retrying a message with text and images", async () => {
+      mockAcpSendMessage.mockResolvedValue(undefined);
+
+      const msgWithImage: Message = {
+        id: "u1",
+        role: "user",
+        created: Date.now(),
+        content: [
+          { type: "text", text: "Look at this" },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              mediaType: "image/jpeg",
+              data: "base64data",
+            },
+          },
+        ],
+        metadata: { userVisible: true, agentVisible: true },
+      };
+      useChatStore.getState().setMessages("session-1", [msgWithImage]);
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      await act(async () => {
+        await result.current.retryMessage("u1");
+      });
+
+      expect(mockAcpSendMessage).toHaveBeenCalledWith(
+        "session-1",
+        "goose",
+        expect.stringContaining("Look at this"),
+        expect.objectContaining({
+          images: [["base64data", "image/jpeg"]],
+        }),
+      );
+    });
+  });
+
+  describe("cancelEdit", () => {
+    it("clears editing state but preserves compose draft", () => {
+      const userMsg: Message = {
+        id: "u1",
+        role: "user",
+        created: Date.now(),
+        content: [{ type: "text", text: "Hello" }],
+        metadata: { userVisible: true, agentVisible: true },
+      };
+      useChatStore.getState().setMessages("session-1", [userMsg]);
+      useChatStore.getState().setEditingMessageId("session-1", "u1");
+      useChatStore.getState().setDraft("session-1", "unsent compose text");
+
+      const { result } = renderHook(() => useChat("session-1"));
+
+      expect(result.current.editingMessageId).toBe("u1");
+
+      act(() => {
+        result.current.cancelEdit();
+      });
+
+      expect(result.current.editingMessageId).toBeNull();
+      // cancelEdit must NOT wipe the compose draft — only editing state
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        "unsent compose text",
+      );
+    });
   });
 });

@@ -45,11 +45,6 @@
       "title": "Variables de entorno",
       "toggleVisibility": "Alternar visibilidad del valor"
     },
-    "messageBranch": {
-      "next": "Siguiente rama",
-      "page": "{{current}} de {{total}}",
-      "previous": "Rama anterior"
-    },
     "plan": {
       "toggle": "Alternar plan"
     },

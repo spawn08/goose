@@ -11,9 +11,29 @@ const EXCEPTIONS = {
       "Drag-and-drop handlers plus activeProjectId highlight for draft-in-project sessions.",
   },
   "src/features/chat/ui/ChatView.tsx": {
-    limit: 535,
+    limit: 600,
     justification:
-      "ACP prewarm guards, project-aware working dir selection, working context sync, and chat bootstrapping still live together here.",
+      "ACP prewarm guards, project-aware working dir selection, working context sync, chat bootstrapping, and inline edit/retry orchestration still live together here.",
+  },
+  "src/features/chat/hooks/__tests__/useChat.test.ts": {
+    limit: 840,
+    justification:
+      "Edit/retry integration tests cover attachment preservation, persona round-tripping, truncation, and draft lifecycle in one cohesive suite.",
+  },
+  "src/features/chat/stores/chatStore.ts": {
+    limit: 520,
+    justification:
+      "Edit-mode draft state, per-session editing message tracking, and cleanup logic added for inline edit/retry.",
+  },
+  "src/features/chat/ui/MessageBubble.tsx": {
+    limit: 610,
+    justification:
+      "Inline edit textarea, save/cancel controls, and attachment re-display for edit/retry colocated with message rendering.",
+  },
+  "src/features/chat/ui/__tests__/MessageBubble.test.tsx": {
+    limit: 560,
+    justification:
+      "Edit/retry button visibility, inline edit save/cancel, and attachment preservation tests added to existing bubble suite.",
   },
   "src/features/chat/ui/__tests__/ContextPanel.test.tsx": {
     limit: 550,

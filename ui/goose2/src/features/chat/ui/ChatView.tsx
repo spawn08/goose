@@ -8,6 +8,7 @@ import { LoadingGoose } from "./LoadingGoose";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 import { useChat } from "../hooks/useChat";
 import { useMessageQueue } from "../hooks/useMessageQueue";
+import { rebuildAttachmentDrafts } from "../lib/attachments";
 import { useChatStore } from "../stores/chatStore";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
@@ -403,12 +404,15 @@ export function ChatView({
       activeSessionId,
       chatState,
       queue,
-      stopStreaming,
     ],
   );
 
   /** Save an inline edit: truncate history from the edited message onward, then send the new text. */
-  const pendingEditSend = useRef<string | null>(null);
+  const pendingEditSend = useRef<{
+    text: string;
+    persona?: { id: string; name?: string };
+    attachments?: ChatAttachmentDraft[];
+  } | null>(null);
   const handleSaveEdit = useCallback(
     (messageId: string, text: string) => {
       if (chatState !== "idle") {
@@ -422,21 +426,34 @@ export function ChatView({
         store.setEditingMessageId(activeSessionId, null);
         return;
       }
+      // Preserve persona and attachments from the original message
+      const originalMessage = allMessages[editIndex];
+      const targetPersonaId = originalMessage.metadata?.targetPersonaId;
+      const targetPersonaName = originalMessage.metadata?.targetPersonaName;
+      const originalAttachments = rebuildAttachmentDrafts(originalMessage);
+
       store.setMessages(activeSessionId, allMessages.slice(0, editIndex));
       store.setEditingMessageId(activeSessionId, null);
       // Force state to idle so the next render's sendMessage won't bail
       store.setChatState(activeSessionId, "idle");
       // Defer send until React re-renders with fresh chatState
-      pendingEditSend.current = text;
+      pendingEditSend.current = {
+        text,
+        persona: targetPersonaId
+          ? { id: targetPersonaId, name: targetPersonaName }
+          : undefined,
+        attachments:
+          originalAttachments.length > 0 ? originalAttachments : undefined,
+      };
     },
     [activeSessionId, chatState, stopStreaming],
   );
 
   useEffect(() => {
     if (pendingEditSend.current && chatState === "idle") {
-      const text = pendingEditSend.current;
+      const { text, persona, attachments } = pendingEditSend.current;
       pendingEditSend.current = null;
-      sendMessage(text);
+      sendMessage(text, persona, attachments);
     }
   }, [chatState, sendMessage]);
 

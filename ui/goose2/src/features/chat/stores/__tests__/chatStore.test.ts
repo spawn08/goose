@@ -159,6 +159,29 @@ describe("chatStore", () => {
     expect(store.activeSessionId).toBeNull();
   });
 
+  it("sets and clears editingMessageId per session", () => {
+    const store = useChatStore.getState();
+
+    store.setEditingMessageId("s1", "msg-1");
+    expect(useChatStore.getState().editingMessageIdBySession.s1).toBe("msg-1");
+    expect(
+      useChatStore.getState().editingMessageIdBySession.s2,
+    ).toBeUndefined();
+
+    store.setEditingMessageId("s1", null);
+    expect(useChatStore.getState().editingMessageIdBySession.s1).toBeNull();
+  });
+
+  it("cleans up editingMessageId on session cleanup", () => {
+    const store = useChatStore.getState();
+
+    store.setEditingMessageId("s1", "msg-1");
+    store.cleanupSession("s1");
+    expect(
+      useChatStore.getState().editingMessageIdBySession.s1,
+    ).toBeUndefined();
+  });
+
   it("stores and clears scroll targets per session", () => {
     const store = useChatStore.getState();
 

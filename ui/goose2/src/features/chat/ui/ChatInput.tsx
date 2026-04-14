@@ -1,4 +1,11 @@
-import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+} from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -116,11 +123,12 @@ export function ChatInput({
     if (ta && ta.value !== initialValue) {
       setTextRaw(initialValue);
     }
-  }, [initialValue, setTextRaw]);
+  }, [initialValue]);
 
   // Recalculate textarea height after React commits new text to the DOM.
   // useLayoutEffect fires synchronously after DOM mutation but before paint,
   // so scrollHeight already reflects the current value.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: text triggers height recalc via scrollHeight
   useLayoutEffect(() => {
     const ta = textareaRef.current;
     if (ta) {

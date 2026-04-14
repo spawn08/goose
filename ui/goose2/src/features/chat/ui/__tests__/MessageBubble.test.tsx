@@ -474,7 +474,7 @@ describe("MessageBubble", () => {
       />,
     );
     expect(
-      screen.getByText(/will start a new conversation/i),
+      screen.getByText(/responses below will be replaced/i),
     ).toBeInTheDocument();
   });
 
@@ -495,5 +495,62 @@ describe("MessageBubble", () => {
     );
     await user.click(retryBtn);
     expect(onRetryMessage).toHaveBeenCalledWith("msg-retry");
+  });
+
+  // ── edit button visibility tests ──────────────────────────────────
+
+  it("does not show edit button on assistant messages", async () => {
+    const user = userEvent.setup();
+    const onEditMessage = vi.fn();
+    const onRetryMessage = vi.fn();
+    render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "assistant text" }])}
+        onEditMessage={onEditMessage}
+        onRetryMessage={onRetryMessage}
+      />,
+    );
+    await user.hover(screen.getByText("assistant text"));
+    // Wait for HoverCard to appear (retry button should show)
+    await waitFor(() => screen.getByRole("button", { name: /retry/i }));
+    // Edit button should NOT be present for assistant messages
+    expect(
+      screen.queryByRole("button", { name: /edit/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows edit button on user messages when onEditMessage is provided", async () => {
+    const user = userEvent.setup();
+    const onEditMessage = vi.fn();
+    render(
+      <MessageBubble
+        message={userMessage("user text")}
+        onEditMessage={onEditMessage}
+      />,
+    );
+    await user.hover(screen.getByText("user text"));
+    const editBtn = await waitFor(() =>
+      screen.getByRole("button", { name: /edit/i }),
+    );
+    expect(editBtn).toBeInTheDocument();
+  });
+
+  // ── Shift+Enter in edit mode ──────────────────────────────────────
+
+  it("does not trigger save on Shift+Enter in edit mode (allows multiline)", async () => {
+    const user = userEvent.setup();
+    const onSaveEdit = vi.fn();
+    render(
+      <MessageBubble
+        message={userMessage("multiline test", { id: "msg-ml" })}
+        isEditing
+        onSaveEdit={onSaveEdit}
+        onCancelEdit={vi.fn()}
+      />,
+    );
+    const textarea = screen.getByRole("textbox");
+    await user.click(textarea);
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    expect(onSaveEdit).not.toHaveBeenCalled();
   });
 });

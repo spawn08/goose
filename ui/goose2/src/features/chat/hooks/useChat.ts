@@ -23,6 +23,7 @@ import {
   buildAcpImages,
   buildAttachmentPromptPreamble,
   buildMessageAttachments,
+  rebuildAttachmentDrafts,
 } from "../lib/attachments";
 
 function getErrorMessage(error: unknown): string {
@@ -336,9 +337,7 @@ export function useChat(
       if (chatState === "streaming" || chatState === "thinking") return;
 
       const sessionMessages = store.messagesBySession[sessionId] ?? [];
-      const targetIndex = sessionMessages.findIndex(
-        (m) => m.id === messageId,
-      );
+      const targetIndex = sessionMessages.findIndex((m) => m.id === messageId);
       if (targetIndex === -1) return;
 
       const targetMessage = sessionMessages[targetIndex];
@@ -361,20 +360,29 @@ export function useChat(
         truncateFromIndex = userIndex;
       }
 
+      // Extract re-sendable content BEFORE truncating so we never lose data
+      const textContent = userMessage.content.find((c) => c.type === "text");
+      const text = textContent && "text" in textContent ? textContent.text : "";
+
+      // Reconstruct attachment drafts from stored metadata + image content
+      const attachmentDrafts = rebuildAttachmentDrafts(userMessage);
+      const hasContent = text.trim() || attachmentDrafts.length > 0;
+
+      // Bail if there's nothing to re-send — don't truncate
+      if (!hasContent) return;
+
       // Truncate from the user message onward (removes user msg + all responses)
       store.setMessages(sessionId, sessionMessages.slice(0, truncateFromIndex));
 
-      const textContent = userMessage.content.find((c) => c.type === "text");
-      if (textContent && "text" in textContent) {
-        const targetPersonaId = userMessage.metadata?.targetPersonaId;
-        const targetPersonaName = userMessage.metadata?.targetPersonaName;
-        await sendMessage(
-          textContent.text,
-          targetPersonaId
-            ? { id: targetPersonaId, name: targetPersonaName }
-            : undefined,
-        );
-      }
+      const targetPersonaId = userMessage.metadata?.targetPersonaId;
+      const targetPersonaName = userMessage.metadata?.targetPersonaName;
+      await sendMessage(
+        text,
+        targetPersonaId
+          ? { id: targetPersonaId, name: targetPersonaName }
+          : undefined,
+        attachmentDrafts.length > 0 ? attachmentDrafts : undefined,
+      );
     },
     [sessionId, store, sendMessage, chatState],
   );
@@ -408,10 +416,9 @@ export function useChat(
     [sessionId, store, chatState],
   );
 
-  /** Cancel edit mode — clears editing state and draft. */
+  /** Cancel edit mode — clears only the editing state, not the compose draft. */
   const cancelEdit = useCallback(() => {
     store.setEditingMessageId(sessionId, null);
-    store.clearDraft(sessionId);
   }, [sessionId, store]);
 
   const clearChat = useCallback(() => {

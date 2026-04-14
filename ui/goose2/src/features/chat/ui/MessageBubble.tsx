@@ -1,4 +1,11 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, memo } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  memo,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Copy,
@@ -347,6 +354,7 @@ export const MessageBubble = memo(function MessageBubble({
   }, [canEdit, isEditing, textContent]);
 
   // Auto-resize on every text change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: editText triggers height recalc via scrollHeight
   useLayoutEffect(() => {
     const ta = editTextareaRef.current;
     if (canEdit && isEditing && ta) {
@@ -472,6 +480,7 @@ export const MessageBubble = memo(function MessageBubble({
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
               onKeyDown={handleEditKeyDown}
+              aria-label={t("chat:edit.textareaAriaLabel")}
               rows={1}
               className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[13px] leading-relaxed text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
@@ -480,10 +489,7 @@ export const MessageBubble = memo(function MessageBubble({
                 {t("chat:edit.hint")}
               </span>
               <div className="ml-auto flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={onCancelEdit}
-                >
+                <Button variant="ghost" onClick={onCancelEdit}>
                   {t("common:actions.cancel")}
                 </Button>
                 <Button
@@ -498,9 +504,9 @@ export const MessageBubble = memo(function MessageBubble({
           </div>
         ) : (
           <HoverCard openDelay={0} closeDelay={150}>
-            {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegated link handler */}
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: delegated link handler */}
             <HoverCardTrigger asChild>
+              {/* biome-ignore lint/a11y/useKeyWithClickEvents: onClick is a delegated link-click handler on a content container, not a button */}
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: onClick is a delegated link-click handler on a content container, not a button */}
               <div
                 className={cn(
                   "w-full min-w-0 text-[13px] leading-relaxed",
@@ -521,7 +527,9 @@ export const MessageBubble = memo(function MessageBubble({
                 {groupContentSections(content).map((section, sectionIdx) => {
                   if (section.type === "toolChain") {
                     const toolItems = section.items as ToolChainItem[];
-                    return <ToolChainCards key={section.key} toolItems={toolItems} />;
+                    return (
+                      <ToolChainCards key={section.key} toolItems={toolItems} />
+                    );
                   }
                   const block = section.items[0] as MessageContent;
                   return (

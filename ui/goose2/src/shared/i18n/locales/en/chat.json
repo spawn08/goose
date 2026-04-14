@@ -133,7 +133,8 @@
     "label": "Queued: {{text}}"
   },
   "edit": {
-    "hint": "This will start a new conversation from this point"
+    "hint": "Responses below will be replaced",
+    "textareaAriaLabel": "Edit message"
   },
   "skeleton": {
     "loadingConversation": "Loading conversation"
