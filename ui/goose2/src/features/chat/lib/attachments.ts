@@ -97,6 +97,12 @@ export function rebuildAttachmentDrafts(
   // entries when we already reconstructed image drafts from content blocks.
   // An uploaded image is stored as both a base64 content block and a metadata
   // file entry — including both would duplicate the image in the re-send.
+  //
+  // TODO: This heuristic assumes all uploaded images produce both a content
+  // block and a metadata entry. If a future code path stores an image only in
+  // metadata (without a corresponding content block), this broad skip will
+  // silently drop it. If that changes, switch to per-image matching by
+  // name or content hash instead of the blanket `hasImageDrafts` flag.
   const hasImageDrafts = drafts.some((d) => d.kind === "image");
   for (const att of message.metadata?.attachments ?? []) {
     if (att.type === "directory" && att.path) {

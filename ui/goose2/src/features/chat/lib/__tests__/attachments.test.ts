@@ -38,7 +38,9 @@ describe("rebuildAttachmentDrafts", () => {
     // NOT a second file draft from the metadata entry
     expect(drafts).toHaveLength(1);
     expect(drafts[0].kind).toBe("image");
-    expect(drafts[0].base64).toBe("iVBORw0KGgo=");
+    if (drafts[0].kind === "image") {
+      expect(drafts[0].base64).toBe("iVBORw0KGgo=");
+    }
   });
 
   it("preserves non-image file metadata alongside image content blocks", () => {

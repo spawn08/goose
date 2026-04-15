@@ -565,7 +565,7 @@ export const MessageBubble = memo(function MessageBubble({
             >
               <MessageActions>
                 {textContent && <CopyAction text={textContent} />}
-                {onRetryMessage && (
+                {!isUser && onRetryMessage && (
                   <MessageAction
                     tooltip={t("common:actions.retry")}
                     onClick={() => onRetryMessage(message.id)}

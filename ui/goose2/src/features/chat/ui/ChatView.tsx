@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence } from "motion/react";
 import { MessageTimeline } from "./MessageTimeline";
@@ -356,8 +357,12 @@ export function ChatView({
       (s.messagesBySession[activeSessionId]?.length ?? 0) === 0,
   );
 
-  const deferredSend = useRef<{
+  // Unified deferred send — a single ref + effect drains any pending send
+  // that had to wait for a state update (persona switch or edit truncation).
+  const pendingSend = useRef<{
+    reason: "persona" | "edit";
     text: string;
+    persona?: { id: string; name?: string };
     attachments?: ChatAttachmentDraft[];
   } | null>(null);
   const queue = useMessageQueue(activeSessionId, chatState, sendMessage);
@@ -384,7 +389,7 @@ export function ChatView({
         }
         handlePersonaChange(personaId);
         // Defer the send until after persona state updates
-        deferredSend.current = { text, attachments };
+        pendingSend.current = { reason: "persona", text, attachments };
         return;
       }
       // Queue if agent is busy and no message already queued
@@ -408,11 +413,6 @@ export function ChatView({
   );
 
   /** Save an inline edit: truncate history from the edited message onward, then send the new text. */
-  const pendingEditSend = useRef<{
-    text: string;
-    persona?: { id: string; name?: string };
-    attachments?: ChatAttachmentDraft[];
-  } | null>(null);
   const handleSaveEdit = useCallback(
     (messageId: string, text: string) => {
       if (chatState !== "idle") {
@@ -432,35 +432,35 @@ export function ChatView({
       const targetPersonaName = originalMessage.metadata?.targetPersonaName;
       const originalAttachments = rebuildAttachmentDrafts(originalMessage);
 
-      store.setMessages(activeSessionId, allMessages.slice(0, editIndex));
-      store.setEditingMessageId(activeSessionId, null);
-      // Force state to idle so the next render's sendMessage won't bail
-      store.setChatState(activeSessionId, "idle");
-      // Defer send until React re-renders with fresh chatState
-      pendingEditSend.current = {
+      // Use flushSync to commit state updates synchronously so we can call
+      // sendMessage immediately — no timing gap, no race condition.
+      flushSync(() => {
+        store.setMessages(activeSessionId, allMessages.slice(0, editIndex));
+        store.setEditingMessageId(activeSessionId, null);
+        store.setChatState(activeSessionId, "idle");
+      });
+
+      sendMessage(
         text,
-        persona: targetPersonaId
+        targetPersonaId
           ? { id: targetPersonaId, name: targetPersonaName }
           : undefined,
-        attachments:
-          originalAttachments.length > 0 ? originalAttachments : undefined,
-      };
+        originalAttachments.length > 0 ? originalAttachments : undefined,
+      );
     },
-    [activeSessionId, chatState, stopStreaming],
+    [activeSessionId, chatState, stopStreaming, sendMessage],
   );
 
+  // Single drain effect for deferred sends (persona switch path only now —
+  // edit path uses flushSync and calls sendMessage synchronously).
   useEffect(() => {
-    if (pendingEditSend.current && chatState === "idle") {
-      const { text, persona, attachments } = pendingEditSend.current;
-      pendingEditSend.current = null;
-      sendMessage(text, persona, attachments);
-    }
-  }, [chatState, sendMessage]);
-
-  useEffect(() => {
-    if (deferredSend.current && selectedPersona) {
-      const { text, attachments } = deferredSend.current;
-      deferredSend.current = null;
+    if (
+      pendingSend.current &&
+      pendingSend.current.reason === "persona" &&
+      selectedPersona
+    ) {
+      const { text, attachments } = pendingSend.current;
+      pendingSend.current = null;
       sendMessage(text, undefined, attachments);
     }
   }, [sendMessage, selectedPersona]);
