@@ -9,22 +9,34 @@ import {
   ToolContent,
   ToolInput,
   ToolOutput,
+  getStatusBadge,
+  type ToolOutputProps,
 } from "@/shared/ui/ai-elements/tool";
 import { toolStatusMap } from "../lib/toolStatusMap";
 import type { ToolCallStatus } from "@/shared/types/messages";
 import { useArtifactPolicyContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 import type { ArtifactPathCandidate } from "@/features/chat/lib/artifactPathPolicy";
+import {
+  getMcpAppDescriptor,
+  McpAppToolOutput,
+  type McpAppMessageRequest,
+} from "./McpAppToolOutput";
 
 interface ToolCallAdapterProps {
+  sessionId?: string;
   name: string;
+  catalogName?: string;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   result?: string;
+  rawOutput?: unknown;
   isError?: boolean;
   /** Epoch ms when the tool call started executing. */
   startedAt?: number;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onAppMessage?: (request: McpAppMessageRequest) => void | Promise<void>;
+  onAppFrameResize?: () => void;
 }
 
 function useElapsedTime(status: ToolCallStatus, startedAt?: number) {
@@ -204,20 +216,64 @@ function ArtifactActions({
 }
 
 export function ToolCallAdapter({
+  sessionId,
   name,
+  catalogName,
   arguments: args,
   status,
   result,
+  rawOutput,
   isError,
   startedAt,
   open,
   onOpenChange,
+  onAppMessage,
+  onAppFrameResize,
 }: ToolCallAdapterProps) {
   const elapsed = useElapsedTime(status, startedAt);
   const state = toolStatusMap[status];
+  const descriptorToolName = catalogName ?? name;
+  const baseMcpAppDescriptor = useMemo(
+    () =>
+      !isError && rawOutput && sessionId
+        ? getMcpAppDescriptor(rawOutput, descriptorToolName)
+        : null,
+    [descriptorToolName, isError, rawOutput, sessionId],
+  );
+  const output = (rawOutput ?? result) as ToolOutputProps["output"];
 
   const elapsedSeconds =
     status === "executing" && elapsed >= 3 ? elapsed : undefined;
+
+  if (baseMcpAppDescriptor && sessionId) {
+    return (
+      <div className="w-full space-y-3">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-medium text-sm">{name}</span>
+          {getStatusBadge(state)}
+          {elapsedSeconds != null && (
+            <span className="tabular-nums text-xs text-muted-foreground">
+              {elapsedSeconds}s
+            </span>
+          )}
+        </div>
+        <McpAppToolOutput
+          sessionId={sessionId}
+          toolName={name}
+          catalogToolName={catalogName}
+          status={status}
+          descriptor={baseMcpAppDescriptor}
+          toolInput={args}
+          rawOutput={rawOutput}
+          resultText={result}
+          isError={isError}
+          onMessage={onAppMessage}
+          onFrameResize={onAppFrameResize}
+        />
+        <ArtifactActions args={args} name={name} result={result} />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -233,7 +289,7 @@ export function ToolCallAdapter({
         <ToolContent>
           {Object.keys(args).length > 0 && <ToolInput input={args} />}
           <ToolOutput
-            output={isError ? undefined : result}
+            output={isError ? undefined : output}
             errorText={isError ? result : undefined}
           />
         </ToolContent>

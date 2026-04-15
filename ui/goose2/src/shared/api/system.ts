@@ -29,6 +29,21 @@ export async function saveExportedSessionFile(
   return invoke("save_exported_session_file", { defaultFilename, contents });
 }
 
+export async function saveDownloadedFile(options: {
+  defaultFilename: string;
+  mimeType?: string | null;
+  contentsText?: string | null;
+  contentsBase64?: string | null;
+}): Promise<string | null> {
+  const { defaultFilename, mimeType, contentsText, contentsBase64 } = options;
+  return invoke("save_downloaded_file", {
+    defaultFilename,
+    mimeType: mimeType ?? null,
+    contentsText: contentsText ?? null,
+    contentsBase64: contentsBase64 ?? null,
+  });
+}
+
 export async function pathExists(path: string): Promise<boolean> {
   return invoke("path_exists", { path });
 }

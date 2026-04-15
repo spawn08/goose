@@ -33,6 +33,10 @@ import {
 import { ToolChainCards, type ToolChainItem } from "./ToolChainCards";
 import { ClickableImage } from "./ClickableImage";
 import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHandler";
+import {
+  getMcpAppDescriptor,
+  type McpAppMessageRequest,
+} from "./McpAppToolOutput";
 import type {
   Message,
   MessageAttachment,
@@ -85,10 +89,13 @@ function MessageAttachmentRow({
 
 interface MessageBubbleProps {
   message: Message;
+  sessionId?: string;
   isStreaming?: boolean;
   onCopy?: () => void;
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
+  onAppMessage?: (request: McpAppMessageRequest) => void | Promise<void>;
+  onAppFrameResize?: () => void;
 }
 
 interface ContentSection {
@@ -178,6 +185,33 @@ function groupContentSections(content: MessageContent[]): ContentSection[] {
   flushToolChain();
 
   return sections;
+}
+
+function hasMcpAppContent(content: MessageContent[]): boolean {
+  const requestCatalogNames = new Map<string, string>();
+
+  for (const block of content) {
+    if (block.type === "toolRequest") {
+      requestCatalogNames.set(block.id, block.catalogName ?? block.name);
+      continue;
+    }
+
+    if (block.type !== "toolResponse" || !block.rawOutput) {
+      continue;
+    }
+
+    const toolName =
+      block.catalogName ??
+      requestCatalogNames.get(block.id) ??
+      block.name ??
+      "";
+
+    if (toolName && getMcpAppDescriptor(block.rawOutput, toolName)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function renderContentBlock(
@@ -303,9 +337,12 @@ function CopyAction({ text }: { text: string }) {
 
 export const MessageBubble = memo(function MessageBubble({
   message,
+  sessionId,
   isStreaming,
   onRetryMessage,
   onEditMessage,
+  onAppMessage,
+  onAppFrameResize,
 }: MessageBubbleProps) {
   const { t } = useTranslation(["chat", "common"]);
   const { formatDate } = useLocaleFormatting();
@@ -339,6 +376,7 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   const isUser = role === "user";
+  const hasMcpApp = !isUser && hasMcpAppContent(content);
   const assistantProviderId = message.metadata?.providerId;
   const assistantProviderName = assistantProviderId
     ? (getCatalogEntry(assistantProviderId)?.displayName ??
@@ -359,12 +397,13 @@ export const MessageBubble = memo(function MessageBubble({
 
   return (
     <div
-      className={cn(
-        "group flex px-4 py-1",
-        "animate-in fade-in duration-200 motion-reduce:animate-none",
-        isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row",
-      )}
-      data-role={isUser ? "user-message" : "assistant-message"}
+        className={cn(
+          "group flex px-4 py-1",
+          "animate-in fade-in duration-200 motion-reduce:animate-none",
+          isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row",
+          hasMcpApp && "w-full",
+        )}
+        data-role={isUser ? "user-message" : "assistant-message"}
     >
       {isUser ? (
         <div className="flex h-7 w-7 shrink-0 self-start -mt-1 items-center justify-center rounded-full bg-accent">
@@ -375,7 +414,11 @@ export const MessageBubble = memo(function MessageBubble({
       <div
         className={cn(
           "min-w-0 flex flex-col gap-1",
-          isUser ? "max-w-[80%] items-end" : "max-w-[85%] items-start",
+          isUser
+            ? "max-w-[80%] items-end"
+            : hasMcpApp
+              ? "w-full max-w-full items-start"
+              : "max-w-[85%] items-start",
         )}
       >
         {showAssistantIdentity ? (
@@ -422,7 +465,15 @@ export const MessageBubble = memo(function MessageBubble({
           {groupContentSections(content).map((section, sectionIdx) => {
             if (section.type === "toolChain") {
               const toolItems = section.items as ToolChainItem[];
-              return <ToolChainCards key={section.key} toolItems={toolItems} />;
+              return (
+                <ToolChainCards
+                  key={section.key}
+                  sessionId={sessionId}
+                  toolItems={toolItems}
+                  onAppMessage={onAppMessage}
+                  onAppFrameResize={onAppFrameResize}
+                />
+              );
             }
             const block = section.items[0] as MessageContent;
             return (

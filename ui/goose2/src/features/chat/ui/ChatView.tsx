@@ -25,6 +25,7 @@ import { getHomeDir } from "@/shared/api/system";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import type { ModelOption } from "../types";
 import { ChatContextPanel } from "./ChatContextPanel";
+import type { McpAppMessageRequest } from "./McpAppToolOutput";
 
 const EMPTY_MODELS: ModelOption[] = [];
 
@@ -75,6 +76,7 @@ export function ChatView({
   const session = useChatSessionStore((s) =>
     s.sessions.find((candidate) => candidate.id === activeSessionId),
   );
+  const protocolSessionId = session?.acpSessionId ?? activeSessionId;
   const availableModels = useChatSessionStore(
     (s) => s.modelsBySession[activeSessionId] ?? EMPTY_MODELS,
   );
@@ -446,6 +448,22 @@ export function ChatView({
     },
     [activeSessionId],
   );
+  const handleAppMessage = useCallback(
+    (params: McpAppMessageRequest) => {
+      const nextText = params.content
+        .flatMap((block) =>
+          block.type === "text" && block.text.trim() ? [block.text.trim()] : [],
+        )
+        .join("\n")
+        .trim();
+      if (!nextText) {
+        return;
+      }
+
+      handleSend(nextText);
+    },
+    [handleSend],
+  );
   const handleScrollTargetHandled = useCallback(() => {
     useChatStore.getState().clearScrollTargetMessage(activeSessionId);
   }, [activeSessionId]);
@@ -460,11 +478,13 @@ export function ChatView({
             <ChatLoadingSkeleton />
           ) : (
             <MessageTimeline
+              sessionId={protocolSessionId}
               messages={messages}
               streamingMessageId={streamingMessageId}
               scrollTargetMessageId={scrollTarget?.messageId ?? null}
               scrollTargetQuery={scrollTarget?.query ?? null}
               onScrollTargetHandled={handleScrollTargetHandled}
+              onAppMessage={handleAppMessage}
             />
           )}
 

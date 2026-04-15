@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 use crate::services::acp::payloads::{
     model_options_from_state, DonePayload, MessageCreatedPayload, ModelOption, ModelStatePayload,
     ReplayCompletePayload, SessionBoundPayload, SessionInfoPayload, TextPayload, ToolCallPayload,
-    ToolResultPayload, ToolTitlePayload,
+    ToolInputPayload, ToolResultPayload, ToolTitlePayload,
 };
 
 fn extract_user_message(raw: &str) -> &str {
@@ -55,6 +55,7 @@ fn model_options_from_select_options(options: &SessionConfigSelectOptions) -> Ve
 pub(super) struct SessionRoute {
     pub(super) local_session_id: String,
     pub(super) provider_id: Option<String>,
+    pub(super) assistant_message_id: Option<String>,
     pub(super) writer: Option<Arc<dyn MessageWriter>>,
     pub(super) canceled: bool,
     pub(super) replay_message_id: Option<String>,
@@ -92,6 +93,7 @@ impl SessionEventDispatcher {
             .or_insert_with(|| SessionRoute {
                 local_session_id: local_session_id.to_string(),
                 provider_id: provider_id.map(ToString::to_string),
+                assistant_message_id: None,
                 writer: None,
                 canceled: false,
                 replay_message_id: None,
@@ -112,6 +114,7 @@ impl SessionEventDispatcher {
         goose_session_id: &str,
         local_session_id: &str,
         provider_id: Option<&str>,
+        assistant_message_id: &str,
         writer: Arc<dyn MessageWriter>,
     ) {
         let mut routes = self.routes.lock().await;
@@ -120,6 +123,7 @@ impl SessionEventDispatcher {
             SessionRoute {
                 local_session_id: local_session_id.to_string(),
                 provider_id: provider_id.map(ToString::to_string),
+                assistant_message_id: Some(assistant_message_id.to_string()),
                 writer: Some(writer),
                 canceled: false,
                 replay_message_id: None,
@@ -301,6 +305,17 @@ fn extract_content_preview(content: &[agent_client_protocol::ToolCallContent]) -
     None
 }
 
+fn build_tool_result_parts(
+    content: Option<&[agent_client_protocol::ToolCallContent]>,
+    raw_output: Option<&serde_json::Value>,
+) -> Option<(Option<String>, Option<serde_json::Value>)> {
+    if content.is_none() && raw_output.is_none() {
+        return None;
+    }
+
+    Some((content.and_then(extract_content_preview), raw_output.cloned()))
+}
+
 #[async_trait(?Send)]
 impl Client for SessionEventDispatcher {
     async fn request_permission(
@@ -375,10 +390,22 @@ impl Client for SessionEventDispatcher {
                             )
                             .await;
                     }
-                    if let Some(content) = &update.fields.content {
-                        if let Some(result) = extract_content_preview(content) {
-                            writer.record_tool_result(&result).await;
-                        }
+                    if let Some((content, raw_output)) = build_tool_result_parts(
+                        update.fields.content.as_deref(),
+                        update.fields.raw_output.as_ref(),
+                    ) {
+                        let _ = self.app_handle.emit(
+                            "acp:tool_result",
+                            ToolResultPayload {
+                                session_id: route.local_session_id.clone(),
+                                message_id: route
+                                    .assistant_message_id
+                                    .clone()
+                                    .unwrap_or_default(),
+                                content,
+                                raw_output,
+                            },
+                        );
                     }
                 }
                 _ => {}
@@ -492,6 +519,17 @@ impl Client for SessionEventDispatcher {
                 };
 
                 if let Some(message_id) = replay_msg_id {
+                    if let Some(input) = update.fields.raw_input.as_ref() {
+                        let _ = self.app_handle.emit(
+                            "acp:tool_input",
+                            ToolInputPayload {
+                                session_id: local_session_id.clone(),
+                                message_id: message_id.clone(),
+                                tool_call_id: update.tool_call_id.0.to_string(),
+                                input: input.clone(),
+                            },
+                        );
+                    }
                     if let Some(title) = &update.fields.title {
                         let _ = self.app_handle.emit(
                             "acp:tool_title",
@@ -503,19 +541,17 @@ impl Client for SessionEventDispatcher {
                             },
                         );
                     }
-                    if let Some(content) = &update.fields.content {
-                        // During replay, always emit a tool_result so the
-                        // frontend can mark the tool request as completed.
-                        // Fall back to a generic summary when the content
-                        // type has no preview extractor.
-                        let result =
-                            extract_content_preview(content).unwrap_or_else(|| "Done".to_string());
+                    if let Some((content, raw_output)) = build_tool_result_parts(
+                        update.fields.content.as_deref(),
+                        update.fields.raw_output.as_ref(),
+                    ) {
                         let _ = self.app_handle.emit(
                             "acp:tool_result",
                             ToolResultPayload {
                                 session_id: local_session_id,
                                 message_id,
-                                content: result,
+                                content: Some(content.unwrap_or_else(|| "Done".to_string())),
+                                raw_output,
                             },
                         );
                     }

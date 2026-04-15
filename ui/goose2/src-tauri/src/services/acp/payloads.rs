@@ -48,13 +48,24 @@ pub(crate) struct ToolTitlePayload {
     pub title: String,
 }
 
+/// Payload for the `acp:tool_input` event.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolInputPayload {
+    pub session_id: String,
+    pub message_id: String,
+    pub tool_call_id: String,
+    pub input: serde_json::Value,
+}
+
 /// Payload for the `acp:tool_result` event.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ToolResultPayload {
     pub session_id: String,
     pub message_id: String,
-    pub content: String,
+    pub content: Option<String>,
+    pub raw_output: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Serialize)]

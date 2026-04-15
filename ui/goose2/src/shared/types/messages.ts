@@ -63,6 +63,7 @@ export interface ToolRequestContent {
   type: "toolRequest";
   id: string;
   name: string;
+  catalogName?: string;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   /** Epoch ms when the tool call started executing (set on event receipt). */
@@ -73,7 +74,9 @@ export interface ToolResponseContent {
   type: "toolResponse";
   id: string;
   name: string;
-  result: string;
+  catalogName?: string;
+  result?: string;
+  rawOutput?: unknown;
   isError: boolean;
 }
 

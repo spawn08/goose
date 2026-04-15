@@ -1039,16 +1039,14 @@ impl GooseAcpAgent {
             .ok()
             .and_then(|tc| tc.arguments.as_ref())
             .map(|a| serde_json::Value::Object(a.clone()));
+        let formatted_name = format_tool_name(&tool_name);
         let fallback_title = summarize_tool_call(&tool_name, args_value.as_ref());
 
         cx.send_notification(SessionNotification::new(
             session_id.clone(),
             SessionUpdate::ToolCall(
-                ToolCall::new(
-                    ToolCallId::new(tool_request.id.clone()),
-                    fallback_title.clone(),
-                )
-                .status(ToolCallStatus::Pending),
+                ToolCall::new(ToolCallId::new(tool_request.id.clone()), formatted_name)
+                    .status(ToolCallStatus::Pending),
             ),
         ))?;
 

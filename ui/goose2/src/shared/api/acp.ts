@@ -85,6 +85,69 @@ export interface AcpSessionSearchResult {
   matchCount: number;
 }
 
+export interface AcpReadResourceResponse {
+  uri: string;
+  text?: string | null;
+  blob?: string | null;
+  mimeType?: string | null;
+  _meta?: Record<string, unknown> | null;
+}
+
+export interface AcpToolInfo {
+  name: string;
+  description?: string;
+  parameters?: string[];
+  permission?: string | null;
+  inputSchema?: Record<string, unknown> | null;
+  _meta?: Record<string, unknown> | null;
+}
+
+export interface AcpPromptInfo {
+  name: string;
+  description?: string;
+  arguments?: unknown[];
+  _meta?: Record<string, unknown> | null;
+}
+
+export interface AcpResourceInfo {
+  uri: string;
+  name?: string;
+  description?: string;
+  mimeType?: string | null;
+  _meta?: Record<string, unknown> | null;
+}
+
+export interface AcpResourceTemplateInfo {
+  uriTemplate: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType?: string | null;
+  _meta?: Record<string, unknown> | null;
+}
+
+export interface AcpCallToolResult {
+  content?: unknown[];
+  isError?: boolean;
+  structuredContent?: Record<string, unknown>;
+  _meta?: Record<string, unknown> | null;
+}
+
+export interface AcpListResourcesResult {
+  resources: AcpResourceInfo[];
+  nextCursor?: string | null;
+}
+
+export interface AcpListResourceTemplatesResult {
+  resourceTemplates: AcpResourceTemplateInfo[];
+  nextCursor?: string | null;
+}
+
+export interface AcpListPromptsResult {
+  prompts: AcpPromptInfo[];
+  nextCursor?: string | null;
+}
+
 /** List all sessions known to the goose binary. */
 export async function acpListSessions(): Promise<AcpSessionInfo[]> {
   return invoke("acp_list_sessions");
@@ -112,6 +175,68 @@ export async function acpLoadSession(
     sessionId,
     gooseSessionId,
     workingDir: workingDir ?? null,
+  });
+}
+
+export async function acpReadResource(
+  sessionId: string,
+  uri: string,
+  extensionName: string,
+): Promise<AcpReadResourceResponse> {
+  return invoke("acp_read_resource", {
+    sessionId,
+    uri,
+    extensionName,
+  });
+}
+
+export async function acpGetTools(sessionId: string): Promise<AcpToolInfo[]> {
+  return invoke("acp_get_tools", {
+    sessionId,
+  });
+}
+
+export async function acpCallTool(
+  sessionId: string,
+  extensionName: string,
+  name: string,
+  arguments_: Record<string, unknown> = {},
+): Promise<AcpCallToolResult> {
+  return invoke("acp_call_tool", {
+    sessionId,
+    extensionName,
+    name,
+    arguments: arguments_,
+  });
+}
+
+export async function acpListResources(
+  sessionId: string,
+  extensionName: string,
+): Promise<AcpListResourcesResult> {
+  return invoke("acp_list_resources", {
+    sessionId,
+    extensionName,
+  });
+}
+
+export async function acpListResourceTemplates(
+  sessionId: string,
+  extensionName: string,
+): Promise<AcpListResourceTemplatesResult> {
+  return invoke("acp_list_resource_templates", {
+    sessionId,
+    extensionName,
+  });
+}
+
+export async function acpListPrompts(
+  sessionId: string,
+  extensionName: string,
+): Promise<AcpListPromptsResult> {
+  return invoke("acp_list_prompts", {
+    sessionId,
+    extensionName,
   });
 }
 

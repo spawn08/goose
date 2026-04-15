@@ -100,6 +100,15 @@ fn prepared_session_for_key(
         .or_else(|| sessions.get(local_session_id).cloned())
 }
 
+pub(super) fn resolve_goose_session_id(
+    sessions: &HashMap<String, PreparedSession>,
+    local_session_id: &str,
+) -> Option<String> {
+    sessions
+        .get(local_session_id)
+        .map(|prepared| prepared.goose_session_id.clone())
+}
+
 fn register_prepared_session_keys(
     sessions: &mut HashMap<String, PreparedSession>,
     composite_key: &str,

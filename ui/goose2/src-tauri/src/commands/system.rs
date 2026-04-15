@@ -79,6 +79,58 @@ pub async fn save_exported_session_file(
 }
 
 #[tauri::command]
+pub async fn save_downloaded_file(
+    window: Window,
+    default_filename: String,
+    mime_type: Option<String>,
+    contents_text: Option<String>,
+    contents_base64: Option<String>,
+) -> Result<Option<String>, String> {
+    let desktop =
+        dirs::desktop_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Desktop"));
+
+    let bytes = if let Some(contents_base64) = contents_base64 {
+        base64::engine::general_purpose::STANDARD
+            .decode(contents_base64)
+            .map_err(|error| format!("Failed to decode base64 file contents: {error}"))?
+    } else if let Some(contents_text) = contents_text {
+        contents_text.into_bytes()
+    } else {
+        return Err("Downloaded file contents were empty".to_string());
+    };
+
+    let mut dialog = window
+        .dialog()
+        .file()
+        .set_title("Download File")
+        .set_file_name(default_filename)
+        .set_directory(desktop);
+
+    if let Some(mime_type) = mime_type {
+        if mime_type == "text/html;profile=mcp-app" {
+            dialog = dialog.add_filter("HTML", &["html"]);
+        }
+    }
+
+    #[cfg(desktop)]
+    {
+        dialog = dialog.set_parent(&window);
+    }
+
+    let Some(path) = dialog.blocking_save_file() else {
+        return Ok(None);
+    };
+
+    let path = path
+        .into_path()
+        .map_err(|_| "Selected save path is not available".to_string())?;
+    std::fs::write(&path, bytes)
+        .map_err(|e| format!("Failed to write file '{}': {}", path.display(), e))?;
+
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
 #[allow(dead_code)]
 pub fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()

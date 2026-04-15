@@ -462,6 +462,80 @@ describe("useAcpStream", () => {
     });
   });
 
+  it("preserves the canonical tool name for catalog lookup after title updates", async () => {
+    setupStreaming(sessionId);
+
+    renderHook(() => useAcpStream(true));
+    await vi.waitFor(() =>
+      expect(listeners.get("acp:tool_result")).toBeDefined(),
+    );
+
+    act(() => {
+      emit("acp:tool_call", {
+        sessionId,
+        messageId: "msg-1",
+        toolCallId: "tool-1",
+        title: "mcpappbench: launcher",
+      });
+      emit("acp:tool_title", {
+        sessionId,
+        messageId: "msg-1",
+        toolCallId: "tool-1",
+        title: "running mcp app benchmark suite",
+      });
+      emit("acp:tool_result", {
+        sessionId,
+        messageId: "msg-1",
+        content: "MCP App Bench launcher loaded.",
+        rawOutput: {
+          content: [
+            {
+              type: "text",
+              text: "MCP App Bench launcher loaded.",
+            },
+          ],
+          extensionName: "mcpappbench",
+          isError: false,
+          structuredContent: {
+            name: "mcp-app-bench",
+          },
+        },
+      });
+    });
+
+    const message = useChatStore.getState().messagesBySession[sessionId][0];
+    expect(message.content).toContainEqual({
+      type: "toolRequest",
+      id: "tool-1",
+      name: "running mcp app benchmark suite",
+      catalogName: "mcpappbench: launcher",
+      arguments: {},
+      status: "completed",
+      startedAt: expect.any(Number),
+    });
+    expect(message.content).toContainEqual({
+      type: "toolResponse",
+      id: "tool-1",
+      name: "running mcp app benchmark suite",
+      catalogName: "mcpappbench: launcher",
+      result: "MCP App Bench launcher loaded.",
+      rawOutput: {
+        content: [
+          {
+            type: "text",
+            text: "MCP App Bench launcher loaded.",
+          },
+        ],
+        extensionName: "mcpappbench",
+        isError: false,
+        structuredContent: {
+          name: "mcp-app-bench",
+        },
+      },
+      isError: false,
+    });
+  });
+
   it("shows an error state when replay_complete is not received within the timeout", async () => {
     vi.useFakeTimers();
     try {
@@ -562,6 +636,79 @@ describe("useAcpStream", () => {
       type: "toolRequest",
       id: "tool-1",
       status: "executing",
+    });
+  });
+
+  it("stores raw tool output alongside the preview text", async () => {
+    const store = useChatStore.getState();
+    store.addMessage(sessionId, {
+      id: "msg-1",
+      role: "assistant",
+      created: Date.now(),
+      content: [
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "Render app",
+          arguments: {},
+          status: "executing",
+        },
+      ],
+      metadata: {
+        userVisible: true,
+        completionStatus: "inProgress",
+      },
+    });
+    store.setStreamingMessageId(sessionId, "msg-1");
+    store.setChatState(sessionId, "streaming");
+
+    renderHook(() => useAcpStream(true));
+    await vi.waitFor(() =>
+      expect(listeners.get("acp:tool_result")).toBeDefined(),
+    );
+
+    act(() => {
+      emit("acp:tool_result", {
+        sessionId,
+        messageId: "msg-1",
+        content: "Interactive app available",
+        rawOutput: {
+          content: [
+            {
+              type: "text",
+              text: "Interactive app available",
+            },
+          ],
+          extensionName: "mcpappbench",
+          isError: false,
+          structuredContent: {
+            name: "mcp-app-bench",
+          },
+        },
+      });
+    });
+
+    const message = useChatStore.getState().messagesBySession[sessionId][0];
+    expect(message.content).toContainEqual({
+      type: "toolResponse",
+      id: "tool-1",
+      name: "Render app",
+      catalogName: "Render app",
+      result: "Interactive app available",
+      rawOutput: {
+        content: [
+          {
+            type: "text",
+            text: "Interactive app available",
+          },
+        ],
+        extensionName: "mcpappbench",
+        isError: false,
+        structuredContent: {
+          name: "mcp-app-bench",
+        },
+      },
+      isError: false,
     });
   });
 });

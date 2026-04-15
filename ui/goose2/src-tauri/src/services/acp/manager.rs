@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use acp_client::MessageWriter;
 use agent_client_protocol::{Agent, ClientSideConnection, ExtRequest};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use tokio::sync::{mpsc, oneshot, OnceCell};
 
@@ -41,6 +41,7 @@ enum ManagerCommand {
         provider_id: String,
         working_dir: PathBuf,
         existing_agent_session_id: Option<String>,
+        assistant_message_id: String,
         writer: Arc<dyn MessageWriter>,
         prompt: String,
         images: Vec<(String, String)>,
@@ -67,6 +68,38 @@ enum ManagerCommand {
         model_id: String,
         response: oneshot::Sender<Result<(), String>>,
     },
+    ReadResource {
+        local_session_id: String,
+        uri: String,
+        extension_name: String,
+        response: oneshot::Sender<Result<AcpReadResourceContent, String>>,
+    },
+    GetTools {
+        local_session_id: String,
+        response: oneshot::Sender<Result<Vec<AcpToolInfo>, String>>,
+    },
+    CallTool {
+        local_session_id: String,
+        extension_name: String,
+        name: String,
+        arguments: serde_json::Value,
+        response: oneshot::Sender<Result<serde_json::Value, String>>,
+    },
+    ListResources {
+        local_session_id: String,
+        extension_name: String,
+        response: oneshot::Sender<Result<serde_json::Value, String>>,
+    },
+    ListResourceTemplates {
+        local_session_id: String,
+        extension_name: String,
+        response: oneshot::Sender<Result<serde_json::Value, String>>,
+    },
+    ListPrompts {
+        local_session_id: String,
+        extension_name: String,
+        response: oneshot::Sender<Result<serde_json::Value, String>>,
+    },
 }
 
 pub struct GooseAcpManager {
@@ -77,6 +110,29 @@ pub struct GooseAcpManager {
 pub struct GooseAcpProvider {
     pub id: String,
     pub label: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpReadResourceContent {
+    pub uri: String,
+    pub text: Option<String>,
+    pub blob: Option<String>,
+    pub mime_type: Option<String>,
+    #[serde(rename = "_meta")]
+    pub meta: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpToolInfo {
+    pub name: String,
+    pub description: String,
+    pub parameters: Vec<String>,
+    pub permission: Option<String>,
+    pub input_schema: Option<serde_json::Value>,
+    #[serde(rename = "_meta")]
+    pub meta: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,6 +243,7 @@ impl GooseAcpManager {
         provider_id: String,
         working_dir: PathBuf,
         existing_agent_session_id: Option<String>,
+        assistant_message_id: String,
         writer: Arc<dyn MessageWriter>,
         prompt: String,
         images: Vec<(String, String)>,
@@ -199,6 +256,7 @@ impl GooseAcpManager {
                 provider_id,
                 working_dir,
                 existing_agent_session_id,
+                assistant_message_id,
                 writer,
                 prompt,
                 images,
@@ -239,6 +297,115 @@ impl GooseAcpManager {
         response_rx
             .await
             .map_err(|_| "Goose ACP manager dropped set model request".to_string())?
+    }
+
+    pub async fn read_resource(
+        &self,
+        local_session_id: String,
+        uri: String,
+        extension_name: String,
+    ) -> Result<AcpReadResourceContent, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(ManagerCommand::ReadResource {
+                local_session_id,
+                uri,
+                extension_name,
+                response: response_tx,
+            })
+            .map_err(|_| "Goose ACP manager is unavailable".to_string())?;
+        response_rx
+            .await
+            .map_err(|_| "Goose ACP manager dropped read resource request".to_string())?
+    }
+
+    pub async fn get_tools(&self, local_session_id: String) -> Result<Vec<AcpToolInfo>, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(ManagerCommand::GetTools {
+                local_session_id,
+                response: response_tx,
+            })
+            .map_err(|_| "Goose ACP manager is unavailable".to_string())?;
+        response_rx
+            .await
+            .map_err(|_| "Goose ACP manager dropped get tools request".to_string())?
+    }
+
+    pub async fn call_tool(
+        &self,
+        local_session_id: String,
+        extension_name: String,
+        name: String,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(ManagerCommand::CallTool {
+                local_session_id,
+                extension_name,
+                name,
+                arguments,
+                response: response_tx,
+            })
+            .map_err(|_| "Goose ACP manager is unavailable".to_string())?;
+        response_rx
+            .await
+            .map_err(|_| "Goose ACP manager dropped call tool request".to_string())?
+    }
+
+    pub async fn list_resources(
+        &self,
+        local_session_id: String,
+        extension_name: String,
+    ) -> Result<serde_json::Value, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(ManagerCommand::ListResources {
+                local_session_id,
+                extension_name,
+                response: response_tx,
+            })
+            .map_err(|_| "Goose ACP manager is unavailable".to_string())?;
+        response_rx
+            .await
+            .map_err(|_| "Goose ACP manager dropped list resources request".to_string())?
+    }
+
+    pub async fn list_resource_templates(
+        &self,
+        local_session_id: String,
+        extension_name: String,
+    ) -> Result<serde_json::Value, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(ManagerCommand::ListResourceTemplates {
+                local_session_id,
+                extension_name,
+                response: response_tx,
+            })
+            .map_err(|_| "Goose ACP manager is unavailable".to_string())?;
+        response_rx
+            .await
+            .map_err(|_| "Goose ACP manager dropped list resource templates request".to_string())?
+    }
+
+    pub async fn list_prompts(
+        &self,
+        local_session_id: String,
+        extension_name: String,
+    ) -> Result<serde_json::Value, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(ManagerCommand::ListPrompts {
+                local_session_id,
+                extension_name,
+                response: response_tx,
+            })
+            .map_err(|_| "Goose ACP manager is unavailable".to_string())?;
+        response_rx
+            .await
+            .map_err(|_| "Goose ACP manager dropped list prompts request".to_string())?
     }
 
     /// Export a session as JSON via the goose binary.

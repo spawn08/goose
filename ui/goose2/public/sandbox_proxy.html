@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>MCP App Sandbox</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        color-scheme: light dark;
+      }
+
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        display: block;
+        background: transparent;
+        color-scheme: light dark;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      const DEFAULT_CSP = {
+        defaultSrc: "'none'",
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+        fontSrc: ["'self'", "data:"],
+        mediaSrc: ["'self'", "data:"],
+        connectSrc: ["'none'"],
+        frameSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'none'"],
+        objectSrc: ["'none'"],
+      };
+
+      let innerFrame = null;
+
+      function logProxy(message, details) {
+        if (details === undefined) {
+          console.debug(`[MCP sandbox proxy] ${message}`);
+          return;
+        }
+
+        console.debug(`[MCP sandbox proxy] ${message}`, details);
+      }
+
+      function uniqueValues(values) {
+        return [...new Set(values.filter(Boolean))];
+      }
+
+      function getInitialCsp() {
+        const params = new URLSearchParams(window.location.search);
+        const raw = params.get("csp");
+        if (!raw) {
+          return null;
+        }
+
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      }
+
+      function buildCspContent(csp) {
+        const resolved = csp && typeof csp === "object" ? csp : {};
+        const resourceDomains = Array.isArray(resolved.resourceDomains)
+          ? resolved.resourceDomains.filter((value) => typeof value === "string")
+          : [];
+        const connectDomains = Array.isArray(resolved.connectDomains)
+          ? resolved.connectDomains.filter((value) => typeof value === "string")
+          : [];
+        const frameDomains = Array.isArray(resolved.frameDomains)
+          ? resolved.frameDomains.filter((value) => typeof value === "string")
+          : [];
+        const baseUriDomains = Array.isArray(resolved.baseUriDomains)
+          ? resolved.baseUriDomains.filter((value) => typeof value === "string")
+          : [];
+
+        const directives = [
+          `default-src ${DEFAULT_CSP.defaultSrc}`,
+          `script-src ${uniqueValues([
+            ...DEFAULT_CSP.scriptSrc,
+            ...resourceDomains,
+          ]).join(" ")}`,
+          `style-src ${uniqueValues([
+            ...DEFAULT_CSP.styleSrc,
+            ...resourceDomains,
+          ]).join(" ")}`,
+          `img-src ${uniqueValues([...DEFAULT_CSP.imgSrc, ...resourceDomains]).join(
+            " ",
+          )}`,
+          `font-src ${uniqueValues([
+            ...DEFAULT_CSP.fontSrc,
+            ...resourceDomains,
+          ]).join(" ")}`,
+          `media-src ${uniqueValues([
+            ...DEFAULT_CSP.mediaSrc,
+            ...resourceDomains,
+          ]).join(" ")}`,
+          `connect-src ${
+            connectDomains.length > 0
+              ? uniqueValues(connectDomains).join(" ")
+              : DEFAULT_CSP.connectSrc.join(" ")
+          }`,
+          `frame-src ${
+            frameDomains.length > 0
+              ? uniqueValues(frameDomains).join(" ")
+              : DEFAULT_CSP.frameSrc.join(" ")
+          }`,
+          `base-uri ${
+            baseUriDomains.length > 0
+              ? uniqueValues(baseUriDomains).join(" ")
+              : DEFAULT_CSP.baseUri.join(" ")
+          }`,
+          `form-action ${DEFAULT_CSP.formAction}`,
+          `object-src ${DEFAULT_CSP.objectSrc}`,
+        ];
+
+        return directives.join("; ");
+      }
+
+      function buildAllowAttribute(permissions) {
+        if (!permissions || typeof permissions !== "object") {
+          return "";
+        }
+
+        const granted = [];
+
+        if (permissions.camera) {
+          granted.push("camera");
+        }
+        if (permissions.microphone) {
+          granted.push("microphone");
+        }
+        if (permissions.geolocation) {
+          granted.push("geolocation");
+        }
+        if (permissions.clipboardWrite) {
+          granted.push("clipboard-write");
+        }
+
+        return granted.join("; ");
+      }
+
+      function isJsonRpcMessage(value) {
+        return (
+          value &&
+          typeof value === "object" &&
+          value.jsonrpc === "2.0" &&
+          ("method" in value || "result" in value || "error" in value)
+        );
+      }
+
+      function injectCspMeta(html, csp) {
+        const meta = `<meta http-equiv="Content-Security-Policy" content="${buildCspContent(
+          csp,
+        ).replace(/"/g, "&quot;")}" />`;
+
+        if (/<head[^>]*>/i.test(html)) {
+          return html.replace(/<head([^>]*)>/i, `<head$1>${meta}`);
+        }
+
+        if (/<html[^>]*>/i.test(html)) {
+          return html.replace(/<html([^>]*)>/i, `<html$1><head>${meta}</head>`);
+        }
+
+        return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
+      }
+
+      function injectMetaIfMissing(html, matcher, metaTag) {
+        if (matcher.test(html)) {
+          return html;
+        }
+
+        if (/<head[^>]*>/i.test(html)) {
+          return html.replace(/<head([^>]*)>/i, `<head$1>${metaTag}`);
+        }
+
+        if (/<html[^>]*>/i.test(html)) {
+          return html.replace(/<html([^>]*)>/i, `<html$1><head>${metaTag}</head>`);
+        }
+
+        return `<!doctype html><html><head>${metaTag}</head><body>${html}</body></html>`;
+      }
+
+      function injectHostMeta(html) {
+        let updated = injectMetaIfMissing(
+          html,
+          /<meta[^>]+name=["']referrer["']/i,
+          '<meta name="referrer" content="no-referrer" />',
+        );
+        updated = injectMetaIfMissing(
+          updated,
+          /<meta[^>]+name=["']color-scheme["']/i,
+          '<meta name="color-scheme" content="light dark" />',
+        );
+        return updated;
+      }
+
+      function buildInnerFrame() {
+        if (innerFrame) {
+          return innerFrame;
+        }
+
+        innerFrame = document.createElement("iframe");
+        innerFrame.style.width = "100%";
+        innerFrame.style.height = "100%";
+        innerFrame.style.border = "0";
+        innerFrame.style.display = "block";
+        innerFrame.style.background = "transparent";
+        innerFrame.style.colorScheme = "light dark";
+        innerFrame.setAttribute(
+          "sandbox",
+          "allow-scripts allow-same-origin allow-forms",
+        );
+        document.body.replaceChildren(innerFrame);
+
+        logProxy("created inner iframe");
+        return innerFrame;
+      }
+
+      function createInnerFrame(params) {
+        const frame = buildInnerFrame();
+
+        frame.dataset.resourceLoaded = "true";
+
+        frame.setAttribute(
+          "sandbox",
+          params.sandbox || "allow-scripts allow-same-origin allow-forms",
+        );
+
+        const allowAttribute = buildAllowAttribute(params.permissions);
+        if (allowAttribute) {
+          frame.setAttribute("allow", allowAttribute);
+          logProxy("set inner iframe allow attribute", allowAttribute);
+        } else {
+          frame.removeAttribute("allow");
+        }
+
+        const html = injectHostMeta(
+          injectCspMeta(params.html, params.csp || getInitialCsp()),
+        );
+        const innerDocument = frame.contentDocument || frame.contentWindow?.document;
+
+        logProxy("received sandbox resource ready", {
+          sandbox: params.sandbox,
+          hasPermissions: Boolean(params.permissions),
+          htmlLength: params.html.length,
+        });
+
+        if (innerDocument) {
+          innerDocument.open();
+          innerDocument.write(html);
+          innerDocument.close();
+          logProxy("wrote app HTML into inner iframe document");
+          return;
+        }
+
+        frame.srcdoc = html;
+        logProxy("fallback to inner iframe srcdoc");
+      }
+
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (!data || typeof data !== "object") {
+          return;
+        }
+
+        if (event.source === window.parent) {
+          if (data.method === "ui/notifications/sandbox-resource-ready") {
+            const params =
+              data.params && typeof data.params === "object" ? data.params : null;
+            if (!params || typeof params.html !== "string") {
+              logProxy("ignored malformed sandbox resource ready", data);
+              return;
+            }
+
+            createInnerFrame(params);
+            return;
+          }
+
+          if (
+            buildInnerFrame().contentWindow &&
+            isJsonRpcMessage(data) &&
+            !(
+              typeof data.method === "string" &&
+              data.method.startsWith("ui/notifications/sandbox-")
+            )
+          ) {
+            logProxy("forwarding host message to inner iframe", {
+              method: data.method,
+              hasResult: "result" in data,
+              hasError: "error" in data,
+            });
+            innerFrame.contentWindow.postMessage(data, "*");
+          }
+          return;
+        }
+
+        if (
+          innerFrame?.contentWindow &&
+          event.source === innerFrame.contentWindow &&
+          isJsonRpcMessage(data) &&
+          !(
+            typeof data.method === "string" &&
+            data.method.startsWith("ui/notifications/sandbox-")
+          )
+        ) {
+          logProxy("forwarding inner iframe message to host", {
+            method: data.method,
+            hasResult: "result" in data,
+            hasError: "error" in data,
+          });
+          window.parent.postMessage(data, "*");
+        }
+      });
+
+      buildInnerFrame();
+    </script>
+  </body>
+</html>

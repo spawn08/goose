@@ -21,6 +21,7 @@ import type {
   AcpDonePayload,
   AcpToolCallPayload,
   AcpToolTitlePayload,
+  AcpToolInputPayload,
   AcpToolResultPayload,
   AcpSessionInfoPayload,
   AcpSessionBoundPayload,
@@ -323,6 +324,7 @@ export function useAcpStream(enabled: boolean): void {
               type: "toolRequest",
               id: toolCallId,
               name: title,
+              catalogName: title,
               arguments: {},
               status: "executing",
               startedAt: Date.now(),
@@ -339,6 +341,7 @@ export function useAcpStream(enabled: boolean): void {
           type: "toolRequest",
           id: toolCallId,
           name: title,
+          catalogName: title,
           arguments: {},
           status: "executing",
           startedAt: Date.now(),
@@ -382,6 +385,46 @@ export function useAcpStream(enabled: boolean): void {
     );
 
     unlisteners.push(
+      listen<AcpToolInputPayload>("acp:tool_input", (event) => {
+        if (!active) return;
+        const { sessionId, messageId, toolCallId, input } = event.payload;
+        const store = useChatStore.getState();
+
+        const normalizedInput =
+          input && typeof input === "object" && !Array.isArray(input)
+            ? (input as Record<string, unknown>)
+            : {};
+
+        if (store.loadingSessionIds.has(sessionId)) {
+          const msg = getBufferedMessage(sessionId, messageId);
+          if (msg) {
+            const toolCall = msg.content.find(
+              (content) =>
+                content.type === "toolRequest" && content.id === toolCallId,
+            );
+            if (toolCall?.type === "toolRequest") {
+              toolCall.arguments = normalizedInput;
+            }
+          }
+          return;
+        }
+
+        if (!shouldTrackStreamingEvent(store, sessionId, messageId)) {
+          return;
+        }
+
+        store.updateMessage(sessionId, messageId, (message) => ({
+          ...message,
+          content: message.content.map((content) =>
+            content.type === "toolRequest" && content.id === toolCallId
+              ? { ...content, arguments: normalizedInput }
+              : content,
+          ),
+        }));
+      }),
+    );
+
+    unlisteners.push(
       listen<AcpToolResultPayload>("acp:tool_result", (event) => {
         if (!active) return;
         const store = useChatStore.getState();
@@ -401,7 +444,9 @@ export function useAcpStream(enabled: boolean): void {
               type: "toolResponse",
               id: toolRequest?.id ?? crypto.randomUUID(),
               name: toolRequest?.name ?? "",
+              catalogName: toolRequest?.catalogName ?? toolRequest?.name ?? "",
               result: content,
+              rawOutput: event.payload.rawOutput,
               isError: false,
             });
           }
@@ -431,7 +476,9 @@ export function useAcpStream(enabled: boolean): void {
           type: "toolResponse",
           id: toolRequest?.id ?? crypto.randomUUID(),
           name: toolRequest?.name ?? "",
+          catalogName: toolRequest?.catalogName ?? toolRequest?.name ?? "",
           result: content,
+          rawOutput: event.payload.rawOutput,
           isError: false,
         };
         store.setStreamingMessageId(sessionId, messageId);

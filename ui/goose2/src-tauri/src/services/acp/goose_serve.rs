@@ -174,6 +174,9 @@ pub(crate) fn resolve_goose_binary() -> Result<PathBuf, String> {
         }
         log::info!("Using GOOSE_BIN override: {override_path}");
         path
+    } else if let Some(path) = find_repo_local_goose_binary()? {
+        log::info!("Using repo-local goose binary: {}", path.display());
+        path
     } else {
         let agent = acp_client::find_acp_agent_by_id("goose")
             .ok_or_else(|| "Unknown or unavailable agent provider: goose".to_string())?;
@@ -215,6 +218,39 @@ pub(crate) fn resolve_goose_binary() -> Result<PathBuf, String> {
     }
 
     Ok(binary_path)
+}
+
+fn find_repo_local_goose_binary() -> Result<Option<PathBuf>, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let Some(repo_root) = manifest_dir
+        .parent()
+        .and_then(|path| path.parent())
+        .and_then(|path| path.parent())
+    else {
+        return Ok(None);
+    };
+
+    let candidates = [
+        repo_root.join("target").join("debug").join("goose"),
+        repo_root.join("target").join("release").join("goose"),
+    ];
+
+    for candidate in candidates {
+        if !candidate.exists() {
+            continue;
+        }
+
+        if goose_binary_supports_serve(&candidate)? {
+            return Ok(Some(candidate));
+        }
+
+        log::warn!(
+            "Skipping repo-local goose binary without serve support: {}",
+            candidate.display(),
+        );
+    }
+
+    Ok(None)
 }
 
 fn goose_binary_supports_serve(binary_path: &PathBuf) -> Result<bool, String> {

@@ -4,8 +4,9 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 use crate::services::acp::{
-    make_composite_key, search_sessions_via_exports, AcpRunningSession, AcpService, AcpSessionInfo,
-    AcpSessionRegistry, GooseAcpManager, SessionSearchResult,
+    make_composite_key, search_sessions_via_exports, AcpReadResourceContent, AcpRunningSession,
+    AcpService, AcpSessionInfo, AcpSessionRegistry, AcpToolInfo, GooseAcpManager,
+    SessionSearchResult,
 };
 
 const DEPRECATED_PROVIDER_IDS: &[&str] = &["claude-code", "codex", "gemini-cli"];
@@ -197,6 +198,72 @@ pub async fn acp_load_session(
     manager
         .load_session(session_id, goose_session_id, working_dir)
         .await
+}
+
+#[tauri::command]
+pub async fn acp_read_resource(
+    app_handle: AppHandle,
+    session_id: String,
+    uri: String,
+    extension_name: String,
+) -> Result<AcpReadResourceContent, String> {
+    let manager = GooseAcpManager::start(app_handle).await?;
+    manager.read_resource(session_id, uri, extension_name).await
+}
+
+#[tauri::command]
+pub async fn acp_get_tools(
+    app_handle: AppHandle,
+    session_id: String,
+) -> Result<Vec<AcpToolInfo>, String> {
+    let manager = GooseAcpManager::start(app_handle).await?;
+    manager.get_tools(session_id).await
+}
+
+#[tauri::command]
+pub async fn acp_call_tool(
+    app_handle: AppHandle,
+    session_id: String,
+    extension_name: String,
+    name: String,
+    arguments: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let manager = GooseAcpManager::start(app_handle).await?;
+    manager
+        .call_tool(session_id, extension_name, name, arguments)
+        .await
+}
+
+#[tauri::command]
+pub async fn acp_list_resources(
+    app_handle: AppHandle,
+    session_id: String,
+    extension_name: String,
+) -> Result<serde_json::Value, String> {
+    let manager = GooseAcpManager::start(app_handle).await?;
+    manager.list_resources(session_id, extension_name).await
+}
+
+#[tauri::command]
+pub async fn acp_list_resource_templates(
+    app_handle: AppHandle,
+    session_id: String,
+    extension_name: String,
+) -> Result<serde_json::Value, String> {
+    let manager = GooseAcpManager::start(app_handle).await?;
+    manager
+        .list_resource_templates(session_id, extension_name)
+        .await
+}
+
+#[tauri::command]
+pub async fn acp_list_prompts(
+    app_handle: AppHandle,
+    session_id: String,
+    extension_name: String,
+) -> Result<serde_json::Value, String> {
+    let manager = GooseAcpManager::start(app_handle).await?;
+    manager.list_prompts(session_id, extension_name).await
 }
 
 #[cfg(test)]

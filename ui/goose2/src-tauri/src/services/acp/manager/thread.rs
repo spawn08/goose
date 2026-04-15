@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent, ClientSideConnection, Implementation, InitializeRequest, ProtocolVersion,
+    Agent, ClientCapabilities, ClientSideConnection, Implementation, InitializeRequest,
+    ProtocolVersion,
 };
 use futures::{SinkExt, StreamExt};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -16,6 +17,28 @@ use crate::services::acp::goose_serve::{GooseServeProcess, WS_BRIDGE_BUFFER_BYTE
 use super::command_dispatch;
 use super::dispatcher::{SessionEventDispatcher, SessionRoute};
 use super::ManagerCommand;
+
+fn goose2_client_capabilities() -> ClientCapabilities {
+    let meta = serde_json::json!({
+        "com.block.goose2": {
+            "structuredToolResult": true,
+            "mcpClientCapabilities": {
+                "extensions": {
+                    "io.modelcontextprotocol/ui": {
+                        "mimeTypes": ["text/html;profile=mcp-app"]
+                    }
+                }
+            }
+        }
+    });
+
+    let meta = match meta {
+        serde_json::Value::Object(map) => map,
+        _ => unreachable!("goose2 client capabilities meta must be an object"),
+    };
+
+    ClientCapabilities::new().meta(meta)
+}
 
 pub(super) fn run_manager_thread(
     app_handle: tauri::AppHandle,
@@ -144,7 +167,8 @@ pub(super) fn run_manager_thread(
             connection
                 .initialize(
                     InitializeRequest::new(ProtocolVersion::LATEST)
-                        .client_info(Implementation::new("goose2", env!("CARGO_PKG_VERSION"))),
+                        .client_info(Implementation::new("goose2", env!("CARGO_PKG_VERSION")))
+                        .client_capabilities(goose2_client_capabilities()),
                 )
                 .await
                 .map_err(|error| format!("Goose ACP initialize failed: {error:?}"))?;

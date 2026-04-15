@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { MessageBubble } from "./MessageBubble";
 import { getTextContent, type Message } from "@/shared/types/messages";
+import {
+  MCP_APP_FRAME_RESIZE_EVENT,
+  type McpAppMessageRequest,
+} from "./McpAppToolOutput";
 
 interface MessageTimelineProps {
+  sessionId?: string;
   messages: Message[];
   streamingMessageId?: string | null;
   scrollTargetMessageId?: string | null;
@@ -13,6 +18,7 @@ interface MessageTimelineProps {
   onScrollTargetHandled?: (messageId: string) => void;
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
+  onAppMessage?: (request: McpAppMessageRequest) => void | Promise<void>;
   className?: string;
 }
 
@@ -50,6 +56,7 @@ function formatDateSeparator(
 }
 
 export function MessageTimeline({
+  sessionId,
   messages,
   streamingMessageId,
   scrollTargetMessageId,
@@ -57,6 +64,7 @@ export function MessageTimeline({
   onScrollTargetHandled,
   onRetryMessage,
   onEditMessage,
+  onAppMessage,
   className,
 }: MessageTimelineProps) {
   const { t } = useTranslation("chat");
@@ -66,6 +74,7 @@ export function MessageTimeline({
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isNearBottomRef = useRef(true);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
+  const appResizeTimeoutRef = useRef<number | null>(null);
   const visibleMessages = messages.filter(
     (m) =>
       m.metadata?.userVisible !== false &&
@@ -143,6 +152,54 @@ export function MessageTimeline({
     return () => window.clearTimeout(timer);
   }, [pulsingMessageId]);
 
+  useEffect(() => {
+    return () => {
+      if (appResizeTimeoutRef.current !== null) {
+        window.clearTimeout(appResizeTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleMcpAppFrameResize = useCallback(() => {
+    if (!containerRef.current || !isNearBottomRef.current) {
+      return;
+    }
+
+    containerRef.current.scrollTo({
+      top: containerRef.current.scrollHeight,
+      behavior: "auto",
+    });
+
+    if (appResizeTimeoutRef.current !== null) {
+      window.clearTimeout(appResizeTimeoutRef.current);
+    }
+
+    appResizeTimeoutRef.current = window.setTimeout(() => {
+      if (!containerRef.current || !isNearBottomRef.current) {
+        return;
+      }
+      containerRef.current.scrollTo({
+        top: containerRef.current.scrollHeight,
+        behavior: "auto",
+      });
+    }, 80);
+  }, []);
+
+  useEffect(() => {
+    const handleMcpAppResize = () => {
+      handleMcpAppFrameResize();
+    };
+
+    window.addEventListener(MCP_APP_FRAME_RESIZE_EVENT, handleMcpAppResize);
+
+    return () => {
+      window.removeEventListener(
+        MCP_APP_FRAME_RESIZE_EVENT,
+        handleMcpAppResize,
+      );
+    };
+  }, [handleMcpAppFrameResize]);
+
   const handleScroll = () => {
     const container = containerRef.current;
     if (!container) return;
@@ -207,6 +264,7 @@ export function MessageTimeline({
               )}
               <MessageBubble
                 message={message}
+                sessionId={sessionId}
                 isStreaming={message.id === streamingMessageId}
                 onRetryMessage={
                   message.role === "assistant" ? onRetryMessage : undefined
@@ -214,6 +272,8 @@ export function MessageTimeline({
                 onEditMessage={
                   message.role === "user" ? onEditMessage : undefined
                 }
+                onAppMessage={onAppMessage}
+                onAppFrameResize={handleMcpAppFrameResize}
               />
             </div>
           );

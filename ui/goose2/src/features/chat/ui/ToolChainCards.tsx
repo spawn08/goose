@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { ToolCallAdapter } from "./ToolCallAdapter";
+import type { McpAppMessageRequest } from "./McpAppToolOutput";
 import type {
   ToolRequestContent,
   ToolResponseContent,
@@ -104,7 +105,17 @@ function partitionToolSteps(toolItems: ToolChainItem[]) {
   return { primaryItems, hiddenItems };
 }
 
-export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
+export function ToolChainCards({
+  sessionId,
+  toolItems,
+  onAppMessage,
+  onAppFrameResize,
+}: {
+  sessionId?: string;
+  toolItems: ToolChainItem[];
+  onAppMessage?: (request: McpAppMessageRequest) => void | Promise<void>;
+  onAppFrameResize?: () => void;
+}) {
   const [showInternalSteps, setShowInternalSteps] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const { primaryItems, hiddenItems } = partitionToolSteps(toolItems);
@@ -123,20 +134,27 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
 
   const renderToolItem = (item: ToolChainItem) => {
     const name = getToolItemName(item);
+    const catalogName =
+      item.request?.catalogName ?? item.response?.catalogName ?? name;
     const status = getToolItemStatus(item);
     const { request, response } = item;
 
     return (
       <ToolCallAdapter
         key={item.key}
+        sessionId={sessionId}
         name={name}
+        catalogName={catalogName}
         arguments={request?.arguments ?? {}}
         status={status}
         result={response?.result}
+        rawOutput={response?.rawOutput}
         isError={response?.isError}
         startedAt={request?.startedAt}
         open={expandedKeys.has(item.key)}
         onOpenChange={(open) => handleOpenChange(item.key, open)}
+        onAppMessage={onAppMessage}
+        onAppFrameResize={onAppFrameResize}
       />
     );
   };

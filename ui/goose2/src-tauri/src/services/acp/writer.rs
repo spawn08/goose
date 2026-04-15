@@ -5,7 +5,8 @@ use acp_client::{MessageWriter, SessionInfoUpdate, SessionModelState};
 
 use super::payloads::{
     model_options_from_state, DonePayload, MessageCreatedPayload, ModelStatePayload,
-    SessionInfoPayload, TextPayload, ToolCallPayload, ToolResultPayload, ToolTitlePayload,
+    SessionInfoPayload, TextPayload, ToolCallPayload, ToolInputPayload, ToolResultPayload,
+    ToolTitlePayload,
 };
 
 /// A [`MessageWriter`] implementation that streams ACP output to the frontend
@@ -82,7 +83,7 @@ impl MessageWriter for TauriMessageWriter {
         &self,
         tool_call_id: &str,
         title: &str,
-        _raw_input: Option<&serde_json::Value>,
+        raw_input: Option<&serde_json::Value>,
     ) {
         let _ = self.app_handle.emit(
             "acp:tool_call",
@@ -93,13 +94,25 @@ impl MessageWriter for TauriMessageWriter {
                 title: title.to_string(),
             },
         );
+
+        if let Some(input) = raw_input {
+            let _ = self.app_handle.emit(
+                "acp:tool_input",
+                ToolInputPayload {
+                    session_id: self.session_id.clone(),
+                    message_id: self.assistant_message_id.clone(),
+                    tool_call_id: tool_call_id.to_string(),
+                    input: input.clone(),
+                },
+            );
+        }
     }
 
     async fn update_tool_call_title(
         &self,
         tool_call_id: &str,
         title: Option<&str>,
-        _raw_input: Option<&serde_json::Value>,
+        raw_input: Option<&serde_json::Value>,
     ) {
         if let Some(title) = title {
             let _ = self.app_handle.emit(
@@ -112,6 +125,18 @@ impl MessageWriter for TauriMessageWriter {
                 },
             );
         }
+
+        if let Some(input) = raw_input {
+            let _ = self.app_handle.emit(
+                "acp:tool_input",
+                ToolInputPayload {
+                    session_id: self.session_id.clone(),
+                    message_id: self.assistant_message_id.clone(),
+                    tool_call_id: tool_call_id.to_string(),
+                    input: input.clone(),
+                },
+            );
+        }
     }
 
     async fn record_tool_result(&self, content: &str) {
@@ -120,7 +145,8 @@ impl MessageWriter for TauriMessageWriter {
             ToolResultPayload {
                 session_id: self.session_id.clone(),
                 message_id: self.assistant_message_id.clone(),
-                content: content.to_string(),
+                content: Some(content.to_string()),
+                raw_output: None,
             },
         );
     }

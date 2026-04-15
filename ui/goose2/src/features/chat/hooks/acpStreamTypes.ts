@@ -32,10 +32,18 @@ export interface AcpToolTitlePayload {
   title: string;
 }
 
+export interface AcpToolInputPayload {
+  sessionId: string;
+  messageId: string;
+  toolCallId: string;
+  input: unknown;
+}
+
 export interface AcpToolResultPayload {
   sessionId: string;
   messageId: string;
-  content: string;
+  content?: string;
+  rawOutput?: unknown;
 }
 
 export interface AcpSessionInfoPayload {

@@ -378,6 +378,9 @@ importers:
 
   goose2:
     dependencies:
+      '@mcp-ui/client':
+        specifier: ^7.0.0
+        version: 7.0.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@radix-ui/react-accordion':
         specifier: ^1.2.12
         version: 1.2.12(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -487,8 +490,8 @@ importers:
         specifier: ^2
         version: 2.10.1
       '@tauri-apps/plugin-dialog':
-        specifier: ^2.6.0
-        version: 2.7.0
+        specifier: 2.6.0
+        version: 2.6.0
       '@tauri-apps/plugin-opener':
         specifier: ^2.5.3
         version: 2.5.3
@@ -1902,6 +1905,12 @@ packages:
 
   '@mcp-ui/client@6.1.0':
     resolution: {integrity: sha512-Wk/9uhu8xdOgHjiaEtAq2RbXn4WGstpFeJ6I71JCP7JC7MtvQB/qnEKDVGSbjwyLnIeZYMSILHf5E+57/YCftQ==}
+    peerDependencies:
+      react: ^19.2.4
+      react-dom: ^19.2.4
+
+  '@mcp-ui/client@7.0.0':
+    resolution: {integrity: sha512-by2YqknAegCbOIjQzEVAjTjopfrbwc0DYycWpAt33qVGv5yx8pChPVmO4l5iILrpVnRUPAtmhguPSoTTL7w0qw==}
     peerDependencies:
       react: ^19.2.4
       react-dom: ^19.2.4
@@ -3484,8 +3493,8 @@ packages:
     engines: {node: '>= 10'}
     hasBin: true
 
-  '@tauri-apps/plugin-dialog@2.7.0':
-    resolution: {integrity: sha512-4nS/hfGMGCXiAS3LtVjH9AgsSAPJeG/7R+q8agTFqytjnMa4Zq95Bq8WzVDkckpanX+yyRHXnRtrKXkANKDHvw==}
+  '@tauri-apps/plugin-dialog@2.6.0':
+    resolution: {integrity: sha512-q4Uq3eY87TdcYzXACiYSPhmpBA76shgmQswGkSVio4C82Sz2W4iehe9TnKYwbq7weHiL88Yw19XZm7v28+Micg==}
 
   '@tauri-apps/plugin-opener@2.5.3':
     resolution: {integrity: sha512-CCcUltXMOfUEArbf3db3kCE7Ggy1ExBEBl51Ko2ODJ6GDYHRp1nSNlQm5uNCFY5k7/ufaK5Ib3Du/Zir19IYQQ==}
@@ -4001,6 +4010,7 @@ packages:
   '@xmldom/xmldom@0.8.11':
     resolution: {integrity: sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@xtuc/ieee754@1.2.0':
     resolution: {integrity: sha512-DX8nKgqcGwsc0eJSqYt5lwP4DH5FlHnmuWWBRy7X0NcaGR0ZtuyeESgMwTYVEtxmsNGY+qit4QYT/MIYTOTPeA==}
@@ -10324,6 +10334,17 @@ snapshots:
       - preact
       - supports-color
 
+  '@mcp-ui/client@7.0.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+    dependencies:
+      '@modelcontextprotocol/ext-apps': 1.2.2(@modelcontextprotocol/sdk@1.27.1(zod@3.25.76))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(zod@3.25.76)
+      '@modelcontextprotocol/sdk': 1.27.1(zod@3.25.76)
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - supports-color
+
   '@mermaid-js/parser@1.1.0':
     dependencies:
       langium: 4.2.2
@@ -11779,7 +11800,7 @@ snapshots:
       '@tauri-apps/cli-win32-ia32-msvc': 2.10.1
       '@tauri-apps/cli-win32-x64-msvc': 2.10.1
 
-  '@tauri-apps/plugin-dialog@2.7.0':
+  '@tauri-apps/plugin-dialog@2.6.0':
     dependencies:
       '@tauri-apps/api': 2.10.1
 

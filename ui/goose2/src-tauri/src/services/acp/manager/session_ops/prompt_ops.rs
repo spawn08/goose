@@ -46,6 +46,7 @@ pub(in super::super) async fn send_prompt_inner(
     provider_id: String,
     working_dir: PathBuf,
     existing_agent_session_id: Option<String>,
+    assistant_message_id: String,
     writer: Arc<dyn MessageWriter>,
     prompt: String,
     images: Vec<(String, String)>,
@@ -81,6 +82,7 @@ pub(in super::super) async fn send_prompt_inner(
             &goose_session_id,
             &local_session_id,
             Some(&provider_id_for_writer),
+            &assistant_message_id,
             writer.clone(),
         )
         .await;
