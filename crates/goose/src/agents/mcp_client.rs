@@ -1,6 +1,7 @@
 use crate::action_required_manager::ActionRequiredManager;
 use crate::agents::tool_execution::ToolCallContext;
 use crate::agents::types::SharedProvider;
+use crate::observation::{publish_jsonrpc_trace, TraceMetadata};
 use crate::session_context::{SESSION_ID_HEADER, WORKING_DIR_HEADER};
 use rmcp::model::{
     CreateElicitationRequestParams, CreateElicitationResult, ElicitationAction, ErrorCode,
@@ -13,10 +14,10 @@ use rmcp::{
         CallToolRequestParams, CallToolResult, CancelledNotificationParam, ClientCapabilities,
         ClientInfo, ClientRequest, CreateMessageRequestParams, CreateMessageResult,
         GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams,
-        InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult, Notification,
-        PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResult,
-        Request, RequestId, RequestOptionalParam, Role, SamplingMessage, ServerNotification,
-        ServerResult,
+        InitializeResult, ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult,
+        ListToolsResult, Notification, PaginatedRequestParams, ProtocolVersion,
+        ReadResourceRequestParams, ReadResourceResult, Request, RequestId, RequestOptionalParam,
+        Role, SamplingMessage, ServerNotification, ServerResult,
     },
     service::{
         ClientInitializeError, PeerRequestOptions, RequestContext, RequestHandle, RunningService,
@@ -36,6 +37,25 @@ use tokio_util::sync::CancellationToken;
 pub type BoxError = Box<dyn std::error::Error + Sync + Send>;
 
 pub type Error = rmcp::ServiceError;
+
+#[derive(Debug, Clone)]
+pub struct McpTraceContext {
+    pub server_name: String,
+    pub transport_kind: String,
+    pub endpoint: Option<String>,
+}
+
+impl McpTraceContext {
+    fn metadata(&self, session_id: Option<&str>, working_dir: Option<&str>) -> TraceMetadata {
+        TraceMetadata {
+            session_id: session_id.map(|value| value.to_string()),
+            extension_name: Some(self.server_name.clone()),
+            transport_kind: Some(self.transport_kind.clone()),
+            endpoint: self.endpoint.clone(),
+            cwd: working_dir.map(|value| value.to_string()),
+        }
+    }
+}
 
 #[async_trait::async_trait]
 pub trait McpClientTrait: Send + Sync {
@@ -71,6 +91,15 @@ pub trait McpClientTrait: Send + Sync {
         _uri: &str,
         _cancel_token: CancellationToken,
     ) -> Result<ReadResourceResult, Error> {
+        Err(Error::TransportClosed)
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _session_id: &str,
+        _next_cursor: Option<String>,
+        _cancel_token: CancellationToken,
+    ) -> Result<ListResourceTemplatesResult, Error> {
         Err(Error::TransportClosed)
     }
 
@@ -112,6 +141,7 @@ pub struct GooseClient {
     session_id: Mutex<Option<String>>,
     client_name: String,
     capabilities: GooseMcpClientCapabilities,
+    trace_context: McpTraceContext,
     working_dir: Arc<tokio::sync::RwLock<PathBuf>>,
 }
 
@@ -121,6 +151,7 @@ impl GooseClient {
         provider: SharedProvider,
         client_name: String,
         capabilities: GooseMcpClientCapabilities,
+        trace_context: McpTraceContext,
         working_dir: PathBuf,
     ) -> Self {
         GooseClient {
@@ -129,6 +160,7 @@ impl GooseClient {
             session_id: Mutex::new(None),
             client_name,
             capabilities,
+            trace_context,
             working_dir: Arc::new(tokio::sync::RwLock::new(working_dir)),
         }
     }
@@ -186,14 +218,31 @@ impl ClientHandler for GooseClient {
         params: rmcp::model::ProgressNotificationParam,
         context: rmcp::service::NotificationContext<rmcp::RoleClient>,
     ) {
+        let session_id = self.resolve_session_id(&context.extensions).await;
+        let working_dir = self.working_dir.read().await.display().to_string();
+        let mut notification = Notification::new(params.clone());
+        notification.extensions = context.extensions.clone();
+        publish_jsonrpc_trace(
+            "mcp_to_goose",
+            "mcp-notification",
+            serde_json::to_value(ServerNotification::ProgressNotification(
+                notification.clone(),
+            ))
+            .unwrap_or_else(|_| {
+                jsonrpc_notification_message("notifications/progress", Some(&params))
+            }),
+            &self
+                .trace_context
+                .metadata(session_id.as_deref(), Some(&working_dir)),
+        );
         self.notification_handlers
             .lock()
             .await
             .iter()
             .for_each(|handler| {
-                let mut not = Notification::new(params.clone());
-                not.extensions = context.extensions.clone();
-                let _ = handler.try_send(ServerNotification::ProgressNotification(not));
+                let _ = handler.try_send(ServerNotification::ProgressNotification(
+                    notification.clone(),
+                ));
             });
     }
 
@@ -202,15 +251,31 @@ impl ClientHandler for GooseClient {
         params: rmcp::model::LoggingMessageNotificationParam,
         context: rmcp::service::NotificationContext<rmcp::RoleClient>,
     ) {
+        let session_id = self.resolve_session_id(&context.extensions).await;
+        let working_dir = self.working_dir.read().await.display().to_string();
+        let mut notification = LoggingMessageNotification::new(params.clone());
+        notification.extensions = context.extensions.clone();
+        publish_jsonrpc_trace(
+            "mcp_to_goose",
+            "mcp-notification",
+            serde_json::to_value(ServerNotification::LoggingMessageNotification(
+                notification.clone(),
+            ))
+            .unwrap_or_else(|_| {
+                jsonrpc_notification_message("notifications/message", Some(&params))
+            }),
+            &self
+                .trace_context
+                .metadata(session_id.as_deref(), Some(&working_dir)),
+        );
         self.notification_handlers
             .lock()
             .await
             .iter()
             .for_each(|handler| {
-                let mut notification = LoggingMessageNotification::new(params.clone());
-                notification.extensions = context.extensions.clone();
-                let _ =
-                    handler.try_send(ServerNotification::LoggingMessageNotification(notification));
+                let _ = handler.try_send(ServerNotification::LoggingMessageNotification(
+                    notification.clone(),
+                ));
             });
     }
 
@@ -386,6 +451,7 @@ pub struct McpClient {
     server_info: Option<InitializeResult>,
     timeout: std::time::Duration,
     docker_container: Option<String>,
+    trace_context: McpTraceContext,
 }
 
 impl McpClient {
@@ -393,6 +459,7 @@ impl McpClient {
         transport: T,
         timeout: std::time::Duration,
         provider: SharedProvider,
+        trace_context: McpTraceContext,
         client_name: String,
         capabilities: GooseMcpClientCapabilities,
         working_dir: PathBuf,
@@ -406,6 +473,7 @@ impl McpClient {
             timeout,
             provider,
             None,
+            trace_context,
             client_name,
             capabilities,
             working_dir,
@@ -418,6 +486,7 @@ impl McpClient {
         timeout: std::time::Duration,
         provider: SharedProvider,
         docker_container: Option<String>,
+        trace_context: McpTraceContext,
         client_name: String,
         capabilities: GooseMcpClientCapabilities,
         working_dir: PathBuf,
@@ -434,11 +503,39 @@ impl McpClient {
             provider,
             client_name.clone(),
             capabilities.clone(),
+            trace_context.clone(),
             working_dir,
         );
+        let init_trace_id = Value::String(format!("init-{}", uuid::Uuid::new_v4()));
+        let init_params = client.get_info();
+        publish_jsonrpc_trace(
+            "goose_to_mcp",
+            "mcp-request",
+            jsonrpc_request_message("initialize", init_trace_id.clone(), Some(&init_params)),
+            &trace_context.metadata(None, None),
+        );
         let client: rmcp::service::RunningService<rmcp::RoleClient, GooseClient> =
-            client.serve(transport).await?;
+            match client.serve(transport).await {
+                Ok(client) => client,
+                Err(error) => {
+                    publish_jsonrpc_trace(
+                        "mcp_to_goose",
+                        "mcp-response",
+                        jsonrpc_display_error_message(init_trace_id, &error),
+                        &trace_context.metadata(None, None),
+                    );
+                    return Err(error);
+                }
+            };
         let server_info = client.peer_info().cloned();
+        if let Some(server_info) = server_info.as_ref() {
+            publish_jsonrpc_trace(
+                "mcp_to_goose",
+                "mcp-response",
+                jsonrpc_response_message(&init_trace_id, server_info),
+                &trace_context.metadata(None, None),
+            );
+        }
 
         Ok(Self {
             client: Mutex::new(client),
@@ -446,6 +543,7 @@ impl McpClient {
             server_info,
             timeout,
             docker_container,
+            trace_context,
         })
     }
 
@@ -469,6 +567,9 @@ impl McpClient {
         cancel_token: CancellationToken,
     ) -> Result<ServerResult, Error> {
         let request = inject_session_context_into_request(request, Some(session_id), working_dir);
+        let trace_metadata = self.trace_context.metadata(Some(session_id), working_dir);
+        let request_method = request.method().to_string();
+        let request_params = request_params_from_request(&request);
         // The inner mutex is held only for the send; the actual response wait
         // happens outside the lock so concurrent calls can overlap.
         let handle = {
@@ -478,9 +579,120 @@ impl McpClient {
                 .send_cancellable_request(request, PeerRequestOptions::no_options())
                 .await
         }?;
+        let trace_id = request_id_value(&handle.id);
+        publish_jsonrpc_trace(
+            "goose_to_mcp",
+            "mcp-request",
+            jsonrpc_request_message_with_params(&request_method, trace_id.clone(), request_params),
+            &trace_metadata,
+        );
 
-        await_response(handle, self.timeout, &cancel_token).await
+        let result = await_response(handle, self.timeout, &cancel_token).await;
+        match &result {
+            Ok(server_result) => publish_jsonrpc_trace(
+                "mcp_to_goose",
+                "mcp-response",
+                jsonrpc_response_message(&trace_id, server_result),
+                &trace_metadata,
+            ),
+            Err(error) => publish_jsonrpc_trace(
+                "mcp_to_goose",
+                "mcp-response",
+                jsonrpc_error_message(trace_id, error),
+                &trace_metadata,
+            ),
+        }
+
+        result
     }
+}
+
+fn request_id_value(request_id: &RequestId) -> Value {
+    serde_json::to_value(request_id).unwrap_or_else(|_| Value::String(format!("{request_id:?}")))
+}
+
+fn jsonrpc_request_message<T: serde::Serialize>(
+    method: &str,
+    id: Value,
+    params: Option<&T>,
+) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+    object.insert("id".to_string(), id);
+    object.insert("method".to_string(), Value::String(method.to_string()));
+    if let Some(params) = params.and_then(|value| serde_json::to_value(value).ok()) {
+        object.insert("params".to_string(), params);
+    }
+    Value::Object(object)
+}
+
+fn jsonrpc_request_message_with_params(method: &str, id: Value, params: Option<Value>) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+    object.insert("id".to_string(), id);
+    object.insert("method".to_string(), Value::String(method.to_string()));
+    if let Some(params) = params {
+        object.insert("params".to_string(), params);
+    }
+    Value::Object(object)
+}
+
+fn jsonrpc_notification_message<T: serde::Serialize>(method: &str, params: Option<&T>) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+    object.insert("method".to_string(), Value::String(method.to_string()));
+    if let Some(params) = params.and_then(|value| serde_json::to_value(value).ok()) {
+        object.insert("params".to_string(), params);
+    }
+    Value::Object(object)
+}
+
+fn request_params_from_request(request: &ClientRequest) -> Option<Value> {
+    serde_json::to_value(request)
+        .ok()
+        .and_then(|value| value.as_object().and_then(|map| map.get("params")).cloned())
+}
+
+fn jsonrpc_response_message<T: serde::Serialize>(id: &Value, result: &T) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+    object.insert("id".to_string(), id.clone());
+    object.insert(
+        "result".to_string(),
+        serde_json::to_value(result).unwrap_or_else(|_| Value::String("<unserializable>".into())),
+    );
+    Value::Object(object)
+}
+
+fn jsonrpc_error_message(id: Value, error: &ServiceError) -> Value {
+    let mut error_object = serde_json::Map::new();
+    error_object.insert("message".to_string(), Value::String(error.to_string()));
+
+    if let ServiceError::McpError(error_data) = error {
+        if let Ok(code) = serde_json::to_value(&error_data.code) {
+            error_object.insert("code".to_string(), code);
+        }
+        if let Some(data) = error_data.data.clone() {
+            error_object.insert("data".to_string(), data);
+        }
+    }
+
+    let mut object = serde_json::Map::new();
+    object.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+    object.insert("id".to_string(), id);
+    object.insert("error".to_string(), Value::Object(error_object));
+    Value::Object(object)
+}
+
+fn jsonrpc_display_error_message(id: Value, error: &impl std::fmt::Display) -> Value {
+    let mut error_object = serde_json::Map::new();
+    error_object.insert("message".to_string(), Value::String(error.to_string()));
+
+    let mut object = serde_json::Map::new();
+    object.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+    object.insert("id".to_string(), id);
+    object.insert("error".to_string(), Value::Object(error_object));
+    Value::Object(object)
 }
 
 async fn await_response(
@@ -565,6 +777,29 @@ impl McpClientTrait for McpClient {
 
         match res {
             ServerResult::ReadResourceResult(result) => Ok(result),
+            _ => Err(ServiceError::UnexpectedResponse),
+        }
+    }
+
+    async fn list_resource_templates(
+        &self,
+        session_id: &str,
+        cursor: Option<String>,
+        cancel_token: CancellationToken,
+    ) -> Result<ListResourceTemplatesResult, Error> {
+        let res = self
+            .send_request_with_context(
+                session_id,
+                None,
+                ClientRequest::ListResourceTemplatesRequest(RequestOptionalParam::with_param(
+                    PaginatedRequestParams::default().with_cursor(cursor),
+                )),
+                cancel_token,
+            )
+            .await?;
+
+        match res {
+            ServerResult::ListResourceTemplatesResult(result) => Ok(result),
             _ => Err(ServiceError::UnexpectedResponse),
         }
     }
@@ -737,6 +972,11 @@ fn inject_session_context_into_request(
                 inject_session_context_into_extensions(req.extensions, session_id, working_dir);
             ClientRequest::ReadResourceRequest(req)
         }
+        ClientRequest::ListResourceTemplatesRequest(mut req) => {
+            req.extensions =
+                inject_session_context_into_extensions(req.extensions, session_id, working_dir);
+            ClientRequest::ListResourceTemplatesRequest(req)
+        }
         ClientRequest::ListToolsRequest(mut req) => {
             req.extensions =
                 inject_session_context_into_extensions(req.extensions, session_id, working_dir);
@@ -779,6 +1019,11 @@ mod tests {
             Arc::new(Mutex::new(None)),
             platform.to_string(),
             capabilities,
+            McpTraceContext {
+                server_name: "test".to_string(),
+                transport_kind: "test".to_string(),
+                endpoint: None,
+            },
             std::env::current_dir().unwrap_or_default(),
         )
     }
@@ -787,6 +1032,7 @@ mod tests {
         match request {
             ClientRequest::ListResourcesRequest(req) => Some(&req.extensions),
             ClientRequest::ReadResourceRequest(req) => Some(&req.extensions),
+            ClientRequest::ListResourceTemplatesRequest(req) => Some(&req.extensions),
             ClientRequest::ListToolsRequest(req) => Some(&req.extensions),
             ClientRequest::CallToolRequest(req) => Some(&req.extensions),
             ClientRequest::ListPromptsRequest(req) => Some(&req.extensions),
@@ -813,6 +1059,12 @@ mod tests {
         let mut req = RequestOptionalParam::with_param(PaginatedRequestParams::default());
         req.extensions = extensions;
         ClientRequest::ListToolsRequest(req)
+    }
+
+    fn list_resource_templates_request(extensions: Extensions) -> ClientRequest {
+        let mut req = RequestOptionalParam::with_param(PaginatedRequestParams::default());
+        req.extensions = extensions;
+        ClientRequest::ListResourceTemplatesRequest(req)
     }
 
     fn call_tool_request(extensions: Extensions) -> ClientRequest {
@@ -875,6 +1127,7 @@ mod tests {
 
     #[test_case(list_resources_request; "list_resources")]
     #[test_case(read_resource_request; "read_resource")]
+    #[test_case(list_resource_templates_request; "list_resource_templates")]
     #[test_case(list_tools_request; "list_tools")]
     #[test_case(call_tool_request; "call_tool")]
     #[test_case(list_prompts_request; "list_prompts")]

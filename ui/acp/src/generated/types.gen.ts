@@ -45,6 +45,61 @@ export type GetToolsResponse = {
 };
 
 /**
+ * Call a tool from an active extension session.
+ */
+export type CallToolRequest = {
+    sessionId: string;
+    name: string;
+    arguments?: unknown;
+};
+
+/**
+ * Tool call response.
+ */
+export type CallToolResponse = {
+    /**
+     * The tool call result from the extension (MCP CallToolResult).
+     */
+    result?: unknown;
+};
+
+/**
+ * List resources for an extension.
+ */
+export type ListResourcesRequest = {
+    sessionId: string;
+    extensionName: string;
+};
+
+/**
+ * Resource list response.
+ */
+export type ListResourcesResponse = {
+    /**
+     * The resource list result from the extension (MCP ListResourcesResult).
+     */
+    result?: unknown;
+};
+
+/**
+ * List resource templates for an extension.
+ */
+export type ListResourceTemplatesRequest = {
+    sessionId: string;
+    extensionName: string;
+};
+
+/**
+ * Resource template list response.
+ */
+export type ListResourceTemplatesResponse = {
+    /**
+     * The resource template list result from the extension (MCP ListResourceTemplatesResult).
+     */
+    result?: unknown;
+};
+
+/**
  * Read a resource from an extension.
  */
 export type ReadResourceRequest = {
@@ -59,6 +114,24 @@ export type ReadResourceRequest = {
 export type ReadResourceResponse = {
     /**
      * The resource result from the extension (MCP ReadResourceResult).
+     */
+    result?: unknown;
+};
+
+/**
+ * List prompts for an extension.
+ */
+export type ListPromptsRequest = {
+    sessionId: string;
+    extensionName: string;
+};
+
+/**
+ * Prompt list response.
+ */
+export type ListPromptsResponse = {
+    /**
+     * The prompt list result from the extension (MCP ListPromptsResult).
      */
     result?: unknown;
 };
@@ -299,14 +372,14 @@ export type UnarchiveSessionRequest = {
 export type ExtRequest = {
     id: string;
     method: string;
-    params?: AddExtensionRequest | RemoveExtensionRequest | GetToolsRequest | ReadResourceRequest | UpdateWorkingDirRequest | DeleteSessionRequest | GetExtensionsRequest | UpdateProviderRequest | ListProvidersRequest | GetProviderDetailsRequest | GetProviderModelsRequest | ReadConfigRequest | UpsertConfigRequest | RemoveConfigRequest | CheckSecretRequest | UpsertSecretRequest | RemoveSecretRequest | ExportSessionRequest | ImportSessionRequest | ArchiveSessionRequest | UnarchiveSessionRequest | {
+    params?: AddExtensionRequest | RemoveExtensionRequest | GetToolsRequest | CallToolRequest | ListResourcesRequest | ListResourceTemplatesRequest | ReadResourceRequest | ListPromptsRequest | UpdateWorkingDirRequest | DeleteSessionRequest | GetExtensionsRequest | UpdateProviderRequest | ListProvidersRequest | GetProviderDetailsRequest | GetProviderModelsRequest | ReadConfigRequest | UpsertConfigRequest | RemoveConfigRequest | CheckSecretRequest | UpsertSecretRequest | RemoveSecretRequest | ExportSessionRequest | ImportSessionRequest | ArchiveSessionRequest | UnarchiveSessionRequest | {
         [key: string]: unknown;
     } | null;
 };
 
 export type ExtResponse = {
     id: string;
-    result?: EmptyResponse | GetToolsResponse | ReadResourceResponse | GetExtensionsResponse | UpdateProviderResponse | ListProvidersResponse | GetProviderDetailsResponse | GetProviderModelsResponse | ReadConfigResponse | CheckSecretResponse | ExportSessionResponse | ImportSessionResponse | unknown;
+    result?: EmptyResponse | GetToolsResponse | CallToolResponse | ListResourcesResponse | ListResourceTemplatesResponse | ReadResourceResponse | ListPromptsResponse | GetExtensionsResponse | UpdateProviderResponse | ListProvidersResponse | GetProviderDetailsResponse | GetProviderModelsResponse | ReadConfigResponse | CheckSecretResponse | ExportSessionResponse | ImportSessionResponse | unknown;
 } | {
     error: {
         code: number;

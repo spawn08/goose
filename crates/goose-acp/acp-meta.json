@@ -16,9 +16,29 @@
       "responseType": "GetToolsResponse"
     },
     {
+      "method": "_goose/tools/call",
+      "requestType": "CallToolRequest",
+      "responseType": "CallToolResponse"
+    },
+    {
+      "method": "_goose/resources/list",
+      "requestType": "ListResourcesRequest",
+      "responseType": "ListResourcesResponse"
+    },
+    {
+      "method": "_goose/resources/templates/list",
+      "requestType": "ListResourceTemplatesRequest",
+      "responseType": "ListResourceTemplatesResponse"
+    },
+    {
       "method": "_goose/resource/read",
       "requestType": "ReadResourceRequest",
       "responseType": "ReadResourceResponse"
+    },
+    {
+      "method": "_goose/prompts/list",
+      "requestType": "ListPromptsRequest",
+      "responseType": "ListPromptsResponse"
     },
     {
       "method": "_goose/working_dir/update",

@@ -56,6 +56,62 @@ pub struct GetToolsResponse {
     pub tools: Vec<serde_json::Value>,
 }
 
+/// Call a tool from an active extension session.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
+#[request(method = "_goose/tools/call", response = CallToolResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct CallToolRequest {
+    pub session_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub arguments: serde_json::Value,
+}
+
+/// Tool call response.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
+pub struct CallToolResponse {
+    /// The tool call result from the extension (MCP CallToolResult).
+    #[serde(default)]
+    pub result: serde_json::Value,
+}
+
+/// List resources for an extension.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
+#[request(method = "_goose/resources/list", response = ListResourcesResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct ListResourcesRequest {
+    pub session_id: String,
+    pub extension_name: String,
+}
+
+/// Resource list response.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
+pub struct ListResourcesResponse {
+    /// The resource list result from the extension (MCP ListResourcesResult).
+    #[serde(default)]
+    pub result: serde_json::Value,
+}
+
+/// List resource templates for an extension.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
+#[request(
+    method = "_goose/resources/templates/list",
+    response = ListResourceTemplatesResponse
+)]
+#[serde(rename_all = "camelCase")]
+pub struct ListResourceTemplatesRequest {
+    pub session_id: String,
+    pub extension_name: String,
+}
+
+/// Resource template list response.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
+pub struct ListResourceTemplatesResponse {
+    /// The resource template list result from the extension (MCP ListResourceTemplatesResult).
+    #[serde(default)]
+    pub result: serde_json::Value,
+}
+
 /// Read a resource from an extension.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
 #[request(method = "_goose/resource/read", response = ReadResourceResponse)]
@@ -70,6 +126,23 @@ pub struct ReadResourceRequest {
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
 pub struct ReadResourceResponse {
     /// The resource result from the extension (MCP ReadResourceResult).
+    #[serde(default)]
+    pub result: serde_json::Value,
+}
+
+/// List prompts for an extension.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
+#[request(method = "_goose/prompts/list", response = ListPromptsResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct ListPromptsRequest {
+    pub session_id: String,
+    pub extension_name: String,
+}
+
+/// Prompt list response.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
+pub struct ListPromptsResponse {
+    /// The prompt list result from the extension (MCP ListPromptsResult).
     #[serde(default)]
     pub result: serde_json::Value,
 }

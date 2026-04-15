@@ -34,7 +34,9 @@ use super::tool_execution::{ToolCallContext, ToolCallResult};
 use super::types::SharedProvider;
 use crate::agents::extension::{Envs, ProcessExit};
 use crate::agents::extension_malware_check;
-use crate::agents::mcp_client::{GooseMcpClientCapabilities, McpClient, McpClientTrait};
+use crate::agents::mcp_client::{
+    GooseMcpClientCapabilities, McpClient, McpClientTrait, McpTraceContext,
+};
 use crate::builtin_extension::get_builtin_extension;
 use crate::config::extensions::name_to_key;
 use crate::config::search_path::SearchPaths;
@@ -249,6 +251,7 @@ async fn child_process_client(
     provider: SharedProvider,
     working_dir: &PathBuf,
     docker_container: Option<String>,
+    trace_context: McpTraceContext,
     client_name: String,
     capabilities: GooseMcpClientCapabilities,
 ) -> ExtensionResult<McpClient> {
@@ -286,6 +289,7 @@ async fn child_process_client(
         Duration::from_secs(resolve_timeout(*timeout)),
         provider,
         docker_container,
+        trace_context,
         client_name,
         capabilities,
         working_dir.clone(),
@@ -455,6 +459,11 @@ async fn create_streamable_http_client(
         transport,
         timeout_duration,
         provider.clone(),
+        McpTraceContext {
+            server_name: name.to_string(),
+            transport_kind: "streamable-http".to_string(),
+            endpoint: Some(uri.to_string()),
+        },
         client_name.clone(),
         capabilities.clone(),
         roots_dir.to_path_buf(),
@@ -485,6 +494,11 @@ async fn create_streamable_http_client(
                         transport,
                         timeout_duration,
                         provider,
+                        McpTraceContext {
+                            server_name: name.to_string(),
+                            transport_kind: "streamable-http".to_string(),
+                            endpoint: Some(uri.to_string()),
+                        },
                         client_name,
                         capabilities,
                         roots_dir.to_path_buf(),
@@ -676,6 +690,11 @@ impl ExtensionManager {
                             self.provider.clone(),
                             &effective_working_dir,
                             Some(container_id.to_string()),
+                            McpTraceContext {
+                                server_name: normalized_name.clone(),
+                                transport_kind: "stdio".to_string(),
+                                endpoint: Some("docker exec goose".to_string()),
+                            },
                             self.client_name.clone(),
                             capabilities,
                         )
@@ -695,6 +714,11 @@ impl ExtensionManager {
                                 (client_read, client_write),
                                 Duration::from_secs(timeout_secs),
                                 self.provider.clone(),
+                                McpTraceContext {
+                                    server_name: normalized_name.clone(),
+                                    transport_kind: "in-process".to_string(),
+                                    endpoint: None,
+                                },
                                 self.client_name.clone(),
                                 capabilities,
                                 effective_working_dir.clone(),
@@ -755,6 +779,11 @@ impl ExtensionManager {
                     self.provider.clone(),
                     &effective_working_dir,
                     container.map(|c| c.id().to_string()),
+                    McpTraceContext {
+                        server_name: sanitized_name.clone(),
+                        transport_kind: "stdio".to_string(),
+                        endpoint: Some(cmd.to_string()),
+                    },
                     self.client_name.clone(),
                     capabilities,
                 )
@@ -791,6 +820,11 @@ impl ExtensionManager {
                     self.provider.clone(),
                     &effective_working_dir,
                     container.map(|c| c.id().to_string()),
+                    McpTraceContext {
+                        server_name: name.clone(),
+                        transport_kind: "stdio".to_string(),
+                        endpoint: Some("uvx".to_string()),
+                    },
                     self.client_name.clone(),
                     capabilities,
                 )
@@ -986,11 +1020,18 @@ impl ExtensionManager {
             .lock()
             .await
             .iter()
-            .map(|(name, ext)| (name.clone(), ext.config.clone(), ext.get_client()))
+            .map(|(name, ext)| {
+                (
+                    name.clone(),
+                    ext.config.clone(),
+                    ext.server_info.clone(),
+                    ext.get_client(),
+                )
+            })
             .collect();
 
         let cancel_token = CancellationToken::default();
-        let client_futures = clients.into_iter().map(|(name, config, client)| {
+        let client_futures = clients.into_iter().map(|(name, config, server_info, client)| {
             let cancel_token = cancel_token.clone();
             let ext_name = name.clone();
             async move {
@@ -1026,6 +1067,13 @@ impl ExtensionManager {
                                 TOOL_EXTENSION_META_KEY.to_string(),
                                 serde_json::Value::String(name.clone()),
                             );
+                            if let Some(server_info) = &server_info {
+                                if let Ok(server_meta) =
+                                    serde_json::to_value(&server_info.server_info)
+                                {
+                                    meta_map.insert("server".to_string(), server_meta);
+                                }
+                            }
 
                             tool.name = public_name.into();
                             tool.meta = Some(rmcp::model::Meta(meta_map));
@@ -1197,6 +1245,67 @@ impl ExtensionManager {
                 ErrorData::new(
                     ErrorCode::INTERNAL_ERROR,
                     format!("Could not read resource with uri: {}", uri),
+                    None,
+                )
+            })
+    }
+
+    pub async fn list_resources_for_extension(
+        &self,
+        session_id: &str,
+        extension_name: &str,
+        cancellation_token: CancellationToken,
+    ) -> Result<rmcp::model::ListResourcesResult, ErrorData> {
+        let client = self
+            .get_server_client(extension_name)
+            .await
+            .ok_or_else(|| {
+                ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("Extension {} is not valid", extension_name),
+                    None,
+                )
+            })?;
+
+        client
+            .list_resources(session_id, None, cancellation_token)
+            .await
+            .map_err(|e| {
+                ErrorData::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Unable to list resources for {}, {:?}", extension_name, e),
+                    None,
+                )
+            })
+    }
+
+    pub async fn list_resource_templates_for_extension(
+        &self,
+        session_id: &str,
+        extension_name: &str,
+        cancellation_token: CancellationToken,
+    ) -> Result<rmcp::model::ListResourceTemplatesResult, ErrorData> {
+        let client = self
+            .get_server_client(extension_name)
+            .await
+            .ok_or_else(|| {
+                ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("Extension {} is not valid", extension_name),
+                    None,
+                )
+            })?;
+
+        client
+            .list_resource_templates(session_id, None, cancellation_token)
+            .await
+            .map_err(|e| {
+                ErrorData::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!(
+                        "Unable to list resource templates for {}, {:?}",
+                        extension_name, e
+                    ),
                     None,
                 )
             })

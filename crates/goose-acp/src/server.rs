@@ -23,7 +23,9 @@ use goose::providers::base::Provider;
 use goose::session::session_manager::SessionType;
 use goose::session::{EnabledExtensionsState, Session, SessionManager};
 use goose_acp_macros::custom_methods;
-use rmcp::model::{CallToolResult, RawContent, ResourceContents, Role};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, JsonObject, RawContent, ResourceContents, Role,
+};
 use sacp::schema::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
     BlobResourceContents, CancelNotification, CloseSessionRequest, CloseSessionResponse,
@@ -68,6 +70,9 @@ pub type AcpProviderFactory = Arc<
 
 const DEFAULT_PROVIDER_ID: &str = "goose";
 const DEFAULT_PROVIDER_LABEL: &str = "Goose (Default)";
+const GOOSE2_META_KEY: &str = "com.block.goose2";
+const GOOSE2_MCP_UI_EXTENSION_KEY: &str = "io.modelcontextprotocol/ui";
+const GOOSE2_MCP_APP_MIME_TYPE: &str = "text/html;profile=mcp-app";
 
 /// In-memory state for an active ACP session.
 ///
@@ -114,12 +119,19 @@ struct AgentSetupRequest {
     resolved_provider: Option<(String, goose::model::ModelConfig)>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Goose2ClientCapabilities {
+    mcp_ui: bool,
+    structured_tool_result: bool,
+}
+
 pub struct GooseAcpAgent {
     sessions: Arc<Mutex<HashMap<String, GooseAcpSession>>>,
     provider_factory: AcpProviderFactory,
     builtins: Vec<String>,
     client_fs_capabilities: OnceCell<FileSystemCapabilities>,
     client_terminal: OnceCell<bool>,
+    client_goose2_capabilities: OnceCell<Goose2ClientCapabilities>,
     config_dir: std::path::PathBuf,
     session_manager: Arc<SessionManager>,
     thread_manager: Arc<goose::session::ThreadManager>,
@@ -373,6 +385,79 @@ fn summarize_tool_call(tool_name: &str, arguments: Option<&serde_json::Value>) -
     }
 }
 
+fn parse_goose2_client_capabilities(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Goose2ClientCapabilities {
+    let goose2_meta = meta
+        .and_then(|meta| meta.get(GOOSE2_META_KEY))
+        .and_then(serde_json::Value::as_object);
+
+    let structured_tool_result = goose2_meta
+        .and_then(|meta| meta.get("structuredToolResult"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+
+    let mcp_ui = goose2_meta
+        .and_then(|meta| meta.get("mcpClientCapabilities"))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|caps| caps.get("extensions"))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|extensions| extensions.get(GOOSE2_MCP_UI_EXTENSION_KEY))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|ui| ui.get("mimeTypes"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|mime_types| {
+            mime_types
+                .iter()
+                .any(|mime_type| mime_type.as_str() == Some(GOOSE2_MCP_APP_MIME_TYPE))
+        });
+
+    Goose2ClientCapabilities {
+        mcp_ui,
+        structured_tool_result,
+    }
+}
+
+fn build_tool_call_raw_output(
+    tool_result: &ToolResult<CallToolResult>,
+    extension_name: Option<&str>,
+) -> Option<serde_json::Value> {
+    let result = match tool_result {
+        Ok(result) if result.structured_content.is_some() || result.meta.is_some() => result,
+        _ => return None,
+    };
+
+    let content = serde_json::to_value(&result.content).ok()?;
+    let mut raw_output = serde_json::Map::from_iter([
+        ("content".to_string(), content),
+        (
+            "isError".to_string(),
+            serde_json::Value::Bool(result.is_error.unwrap_or(false)),
+        ),
+    ]);
+
+    if let Some(structured_content) = &result.structured_content {
+        raw_output.insert("structuredContent".to_string(), structured_content.clone());
+    }
+
+    if let Some(extension_name) = extension_name {
+        raw_output.insert(
+            "extensionName".to_string(),
+            serde_json::Value::String(extension_name.to_string()),
+        );
+    }
+
+    if let Some(meta) = result
+        .meta
+        .as_ref()
+        .and_then(|meta| serde_json::to_value(meta).ok())
+    {
+        raw_output.insert("_meta".to_string(), meta);
+    }
+
+    Some(serde_json::Value::Object(raw_output))
+}
+
 fn builtin_to_extension_config(name: &str) -> ExtensionConfig {
     if let Some(def) = PLATFORM_EXTENSIONS.get(name) {
         ExtensionConfig::Platform {
@@ -621,6 +706,7 @@ impl GooseAcpAgent {
             builtins,
             client_fs_capabilities: OnceCell::new(),
             client_terminal: OnceCell::new(),
+            client_goose2_capabilities: OnceCell::new(),
             config_dir,
             session_manager,
             thread_manager,
@@ -672,18 +758,28 @@ impl GooseAcpAgent {
             .cloned()
             .unwrap_or_default();
         let client_terminal = self.client_terminal.get().copied().unwrap_or(false);
+        let goose2_capabilities = self
+            .client_goose2_capabilities
+            .get()
+            .copied()
+            .unwrap_or_default();
         let provider_factory = Arc::clone(&self.provider_factory);
         let disable_session_naming = self.disable_session_naming;
 
         tokio::spawn(async move {
             let result: Result<(), String> = async {
+                let goose_platform = if goose2_capabilities.mcp_ui {
+                    GoosePlatform::GooseDesktop
+                } else {
+                    GoosePlatform::GooseCli
+                };
                 let agent = Arc::new(Agent::with_config(AgentConfig::new(
                     session_manager,
                     permission_manager,
                     None,
                     goose_mode,
                     disable_session_naming,
-                    GoosePlatform::GooseCli,
+                    goose_platform,
                 )));
 
                 let config_path = config_dir.join(CONFIG_YAML_NAME);
@@ -956,6 +1052,16 @@ impl GooseAcpAgent {
             ),
         ))?;
 
+        if let Some(args_value) = args_value {
+            cx.send_notification(SessionNotification::new(
+                session_id.clone(),
+                SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                    ToolCallId::new(tool_request.id.clone()),
+                    ToolCallUpdateFields::new().raw_input(args_value),
+                )),
+            ))?;
+        }
+
         if let Ok(tool_call) = &tool_request.tool_call {
             let agent = match &session.agent {
                 AgentHandle::Ready(a) => a.clone(),
@@ -1064,6 +1170,20 @@ impl GooseAcpAgent {
         };
 
         let mut fields = ToolCallUpdateFields::new().status(status);
+        let goose2_capabilities = self
+            .client_goose2_capabilities
+            .get()
+            .copied()
+            .unwrap_or_default();
+        let extension_name = session.tool_requests.get(&tool_response.id).and_then(
+            |tool_request| match &tool_request.tool_call {
+                Ok(tool_call) => tool_call
+                    .name
+                    .split_once("__")
+                    .map(|(extension_name, _)| extension_name.to_string()),
+                Err(_) => None,
+            },
+        );
         if !tool_response
             .tool_result
             .as_ref()
@@ -1081,6 +1201,14 @@ impl GooseAcpAgent {
             });
             if !locations.is_empty() {
                 fields = fields.locations(locations);
+            }
+        }
+
+        if goose2_capabilities.structured_tool_result {
+            if let Some(raw_output) =
+                build_tool_call_raw_output(&tool_response.tool_result, extension_name.as_deref())
+            {
+                fields = fields.raw_output(raw_output);
             }
         }
 
@@ -1236,6 +1364,11 @@ impl GooseAcpAgent {
             .client_fs_capabilities
             .set(args.client_capabilities.fs.clone());
         let _ = self.client_terminal.set(args.client_capabilities.terminal);
+        let _ = self
+            .client_goose2_capabilities
+            .set(parse_goose2_client_capabilities(
+                args.client_capabilities.meta.as_ref(),
+            ));
 
         let capabilities = AgentCapabilities::new()
             .load_session(true)
@@ -1559,6 +1692,20 @@ impl GooseAcpAgent {
                                 .status(ToolCallStatus::Pending),
                             ),
                         ))?;
+
+                        if let Ok(tool_call) = &tool_request.tool_call {
+                            if let Some(arguments) = tool_call.arguments.as_ref() {
+                                cx.send_notification(SessionNotification::new(
+                                    args.session_id.clone(),
+                                    SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                                        ToolCallId::new(tool_request.id.clone()),
+                                        ToolCallUpdateFields::new().raw_input(
+                                            serde_json::Value::Object(arguments.clone()),
+                                        ),
+                                    )),
+                                ))?;
+                            }
+                        }
                     }
                     MessageContent::ToolResponse(tool_response) => {
                         // Replay-only: emit the ToolCallUpdate notification,
@@ -1571,6 +1718,21 @@ impl GooseAcpAgent {
                         };
 
                         let mut fields = ToolCallUpdateFields::new().status(status);
+                        let goose2_capabilities = self
+                            .client_goose2_capabilities
+                            .get()
+                            .copied()
+                            .unwrap_or_default();
+                        let extension_name =
+                            replay_tool_requests
+                                .get(&tool_response.id)
+                                .and_then(|tool_request| match &tool_request.tool_call {
+                                    Ok(tool_call) => tool_call
+                                        .name
+                                        .split_once("__")
+                                        .map(|(extension_name, _)| extension_name.to_string()),
+                                    Err(_) => None,
+                                });
                         if !tool_response
                             .tool_result
                             .as_ref()
@@ -1591,6 +1753,15 @@ impl GooseAcpAgent {
                                 });
                             if !locations.is_empty() {
                                 fields = fields.locations(locations);
+                            }
+                        }
+
+                        if goose2_capabilities.structured_tool_result {
+                            if let Some(raw_output) = build_tool_call_raw_output(
+                                &tool_response.tool_result,
+                                extension_name.as_deref(),
+                            ) {
+                                fields = fields.raw_output(raw_output);
                             }
                         }
 
@@ -2202,6 +2373,84 @@ impl GooseAcpAgent {
         Ok(GetToolsResponse { tools: tools_json })
     }
 
+    #[custom_method(CallToolRequest)]
+    async fn on_call_tool(&self, req: CallToolRequest) -> Result<CallToolResponse, sacp::Error> {
+        let internal_id = self.internal_session_id(&req.session_id).await?;
+        let agent = self.get_session_agent(&req.session_id, None).await?;
+        let arguments =
+            match req.arguments {
+                serde_json::Value::Null => None,
+                value => Some(serde_json::from_value::<JsonObject>(value).map_err(|e| {
+                    sacp::Error::invalid_params().data(format!("bad arguments: {e}"))
+                })?),
+            };
+        let tool_call = match arguments {
+            Some(arguments) => CallToolRequestParams::new(req.name).with_arguments(arguments),
+            None => CallToolRequestParams::new(req.name),
+        };
+        let ctx = goose::agents::ToolCallContext::new(internal_id, None, None);
+        let result = agent
+            .extension_manager
+            .dispatch_tool_call(&ctx, tool_call, CancellationToken::new())
+            .await
+            .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
+        let tool_result = result
+            .result
+            .await
+            .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
+        let result_json = serde_json::to_value(&tool_result)
+            .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
+        Ok(CallToolResponse {
+            result: result_json,
+        })
+    }
+
+    #[custom_method(ListResourcesRequest)]
+    async fn on_list_resources(
+        &self,
+        req: ListResourcesRequest,
+    ) -> Result<ListResourcesResponse, sacp::Error> {
+        let internal_id = self.internal_session_id(&req.session_id).await?;
+        let agent = self.get_session_agent(&req.session_id, None).await?;
+        let result = agent
+            .extension_manager
+            .list_resources_for_extension(
+                &internal_id,
+                &req.extension_name,
+                CancellationToken::new(),
+            )
+            .await
+            .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
+        let result_json = serde_json::to_value(&result)
+            .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
+        Ok(ListResourcesResponse {
+            result: result_json,
+        })
+    }
+
+    #[custom_method(ListResourceTemplatesRequest)]
+    async fn on_list_resource_templates(
+        &self,
+        req: ListResourceTemplatesRequest,
+    ) -> Result<ListResourceTemplatesResponse, sacp::Error> {
+        let internal_id = self.internal_session_id(&req.session_id).await?;
+        let agent = self.get_session_agent(&req.session_id, None).await?;
+        let result = agent
+            .extension_manager
+            .list_resource_templates_for_extension(
+                &internal_id,
+                &req.extension_name,
+                CancellationToken::new(),
+            )
+            .await
+            .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
+        let result_json = serde_json::to_value(&result)
+            .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
+        Ok(ListResourceTemplatesResponse {
+            result: result_json,
+        })
+    }
+
     #[custom_method(ReadResourceRequest)]
     async fn on_read_resource(
         &self,
@@ -2218,6 +2467,28 @@ impl GooseAcpAgent {
         let result_json = serde_json::to_value(&result)
             .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
         Ok(ReadResourceResponse {
+            result: result_json,
+        })
+    }
+
+    #[custom_method(ListPromptsRequest)]
+    async fn on_list_prompts(
+        &self,
+        req: ListPromptsRequest,
+    ) -> Result<ListPromptsResponse, sacp::Error> {
+        let internal_id = self.internal_session_id(&req.session_id).await?;
+        let agent = self.get_session_agent(&req.session_id, None).await?;
+        let prompts = agent
+            .extension_manager
+            .list_prompts_from_extension(
+                &internal_id,
+                &req.extension_name,
+                CancellationToken::new(),
+            )
+            .await
+            .map_err(|e| sacp::Error::internal_error().data(e.to_string()))?;
+        let result_json = serde_json::json!({ "prompts": prompts });
+        Ok(ListPromptsResponse {
             result: result_json,
         })
     }

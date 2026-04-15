@@ -73,6 +73,99 @@
       "x-side": "agent",
       "x-method": "_goose/tools"
     },
+    "CallToolRequest": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "arguments": {
+          "default": null
+        }
+      },
+      "required": [
+        "sessionId",
+        "name"
+      ],
+      "description": "Call a tool from an active extension session.",
+      "x-side": "agent",
+      "x-method": "_goose/tools/call"
+    },
+    "CallToolResponse": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "description": "The tool call result from the extension (MCP CallToolResult).",
+          "default": null
+        }
+      },
+      "description": "Tool call response.",
+      "x-side": "agent",
+      "x-method": "_goose/tools/call"
+    },
+    "ListResourcesRequest": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "extensionName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "extensionName"
+      ],
+      "description": "List resources for an extension.",
+      "x-side": "agent",
+      "x-method": "_goose/resources/list"
+    },
+    "ListResourcesResponse": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "description": "The resource list result from the extension (MCP ListResourcesResult).",
+          "default": null
+        }
+      },
+      "description": "Resource list response.",
+      "x-side": "agent",
+      "x-method": "_goose/resources/list"
+    },
+    "ListResourceTemplatesRequest": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "extensionName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "extensionName"
+      ],
+      "description": "List resource templates for an extension.",
+      "x-side": "agent",
+      "x-method": "_goose/resources/templates/list"
+    },
+    "ListResourceTemplatesResponse": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "description": "The resource template list result from the extension (MCP ListResourceTemplatesResult).",
+          "default": null
+        }
+      },
+      "description": "Resource template list response.",
+      "x-side": "agent",
+      "x-method": "_goose/resources/templates/list"
+    },
     "ReadResourceRequest": {
       "type": "object",
       "properties": {
@@ -106,6 +199,36 @@
       "description": "Resource read response.",
       "x-side": "agent",
       "x-method": "_goose/resource/read"
+    },
+    "ListPromptsRequest": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "extensionName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "extensionName"
+      ],
+      "description": "List prompts for an extension.",
+      "x-side": "agent",
+      "x-method": "_goose/prompts/list"
+    },
+    "ListPromptsResponse": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "description": "The prompt list result from the extension (MCP ListPromptsResult).",
+          "default": null
+        }
+      },
+      "description": "Prompt list response.",
+      "x-side": "agent",
+      "x-method": "_goose/prompts/list"
     },
     "UpdateWorkingDirRequest": {
       "type": "object",
@@ -677,11 +800,47 @@
                 {
                   "allOf": [
                     {
+                      "$ref": "#/$defs/CallToolRequest"
+                    }
+                  ],
+                  "description": "Params for _goose/tools/call",
+                  "title": "CallToolRequest"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ListResourcesRequest"
+                    }
+                  ],
+                  "description": "Params for _goose/resources/list",
+                  "title": "ListResourcesRequest"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ListResourceTemplatesRequest"
+                    }
+                  ],
+                  "description": "Params for _goose/resources/templates/list",
+                  "title": "ListResourceTemplatesRequest"
+                },
+                {
+                  "allOf": [
+                    {
                       "$ref": "#/$defs/ReadResourceRequest"
                     }
                   ],
                   "description": "Params for _goose/resource/read",
                   "title": "ReadResourceRequest"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ListPromptsRequest"
+                    }
+                  ],
+                  "description": "Params for _goose/prompts/list",
+                  "title": "ListPromptsRequest"
                 },
                 {
                   "allOf": [
@@ -885,10 +1044,42 @@
                     {
                       "allOf": [
                         {
+                          "$ref": "#/$defs/CallToolResponse"
+                        }
+                      ],
+                      "title": "CallToolResponse"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListResourcesResponse"
+                        }
+                      ],
+                      "title": "ListResourcesResponse"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListResourceTemplatesResponse"
+                        }
+                      ],
+                      "title": "ListResourceTemplatesResponse"
+                    },
+                    {
+                      "allOf": [
+                        {
                           "$ref": "#/$defs/ReadResourceResponse"
                         }
                       ],
                       "title": "ReadResourceResponse"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListPromptsResponse"
+                        }
+                      ],
+                      "title": "ListPromptsResponse"
                     },
                     {
                       "allOf": [

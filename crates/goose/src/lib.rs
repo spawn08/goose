@@ -22,6 +22,7 @@ pub mod logging;
 pub mod mcp_utils;
 pub mod model;
 pub mod oauth;
+pub mod observation;
 #[cfg(feature = "otel")]
 pub mod otel;
 pub mod permission;

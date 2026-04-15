@@ -38,6 +38,52 @@ export const zGetToolsResponse = z.object({
 });
 
 /**
+ * Call a tool from an active extension session.
+ */
+export const zCallToolRequest = z.object({
+    sessionId: z.string(),
+    name: z.string(),
+    arguments: z.unknown().optional().default(null)
+});
+
+/**
+ * Tool call response.
+ */
+export const zCallToolResponse = z.object({
+    result: z.unknown().optional().default(null)
+});
+
+/**
+ * List resources for an extension.
+ */
+export const zListResourcesRequest = z.object({
+    sessionId: z.string(),
+    extensionName: z.string()
+});
+
+/**
+ * Resource list response.
+ */
+export const zListResourcesResponse = z.object({
+    result: z.unknown().optional().default(null)
+});
+
+/**
+ * List resource templates for an extension.
+ */
+export const zListResourceTemplatesRequest = z.object({
+    sessionId: z.string(),
+    extensionName: z.string()
+});
+
+/**
+ * Resource template list response.
+ */
+export const zListResourceTemplatesResponse = z.object({
+    result: z.unknown().optional().default(null)
+});
+
+/**
  * Read a resource from an extension.
  */
 export const zReadResourceRequest = z.object({
@@ -50,6 +96,21 @@ export const zReadResourceRequest = z.object({
  * Resource read response.
  */
 export const zReadResourceResponse = z.object({
+    result: z.unknown().optional().default(null)
+});
+
+/**
+ * List prompts for an extension.
+ */
+export const zListPromptsRequest = z.object({
+    sessionId: z.string(),
+    extensionName: z.string()
+});
+
+/**
+ * Prompt list response.
+ */
+export const zListPromptsResponse = z.object({
     result: z.unknown().optional().default(null)
 });
 
@@ -298,7 +359,11 @@ export const zExtRequest = z.object({
             zAddExtensionRequest,
             zRemoveExtensionRequest,
             zGetToolsRequest,
+            zCallToolRequest,
+            zListResourcesRequest,
+            zListResourceTemplatesRequest,
             zReadResourceRequest,
+            zListPromptsRequest,
             zUpdateWorkingDirRequest,
             zDeleteSessionRequest,
             zGetExtensionsRequest,
@@ -331,7 +396,11 @@ export const zExtResponse = z.union([
             z.union([
                 zEmptyResponse,
                 zGetToolsResponse,
+                zCallToolResponse,
+                zListResourcesResponse,
+                zListResourceTemplatesResponse,
                 zReadResourceResponse,
+                zListPromptsResponse,
                 zGetExtensionsResponse,
                 zUpdateProviderResponse,
                 zListProvidersResponse,
