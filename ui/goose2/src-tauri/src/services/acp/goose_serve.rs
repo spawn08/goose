@@ -128,9 +128,7 @@ async fn wait_for_server_ready(port: u16, child: &mut Child) -> Result<(), Strin
                 }
 
                 if Instant::now() >= deadline {
-                    return Err(format!(
-                        "Timed out waiting for goose serve on port {port}"
-                    ));
+                    return Err(format!("Timed out waiting for goose serve on port {port}"));
                 }
 
                 tokio::time::sleep(GOOSE_SERVE_CONNECT_RETRY_DELAY).await;
@@ -177,7 +175,10 @@ pub(crate) fn resolve_goose_binary() -> Result<PathBuf, String> {
             ));
         }
 
-        log::info!("Resolved goose binary via local discovery: {}", path.display());
+        log::info!(
+            "Resolved goose binary via local discovery: {}",
+            path.display()
+        );
         path
     };
 

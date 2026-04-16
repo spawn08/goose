@@ -1,3 +1,4 @@
+import type { ContentBlock } from "@agentclientprotocol/sdk";
 import * as directAcp from "./acpApi";
 import * as sessionTracker from "./acpSessionTracker";
 import {
@@ -37,10 +38,7 @@ export async function acpSendMessage(
 ): Promise<void> {
   const { systemPrompt, personaId, images } = options;
 
-  const gooseSessionId = sessionTracker.getGooseSessionId(
-    sessionId,
-    personaId,
-  );
+  const gooseSessionId = sessionTracker.getGooseSessionId(sessionId, personaId);
   if (!gooseSessionId) {
     throw new Error("Session not prepared. Call acpPrepareSession first.");
   }
@@ -50,12 +48,10 @@ export async function acpSendMessage(
     ? `<persona-instructions>\n${systemPrompt}\n</persona-instructions>\n\n<user-message>\n${prompt}\n</user-message>`
     : prompt;
 
-  const content: import("@agentclientprotocol/sdk").ContentBlock[] = [
-    { type: "text", text: effectivePrompt },
-  ];
+  const content: ContentBlock[] = [{ type: "text", text: effectivePrompt }];
   if (images) {
     for (const [data, mimeType] of images) {
-      content.push({ type: "image", data, mimeType } as any);
+      content.push({ type: "image", data, mimeType } as ContentBlock);
     }
   }
 
@@ -163,10 +159,7 @@ export async function acpCancelSession(
   sessionId: string,
   personaId?: string,
 ): Promise<boolean> {
-  const gooseSessionId = sessionTracker.getGooseSessionId(
-    sessionId,
-    personaId,
-  );
+  const gooseSessionId = sessionTracker.getGooseSessionId(sessionId, personaId);
   await directAcp.cancelSession(gooseSessionId ?? sessionId);
   return true;
 }
