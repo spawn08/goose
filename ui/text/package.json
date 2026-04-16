@@ -19,15 +19,11 @@
     "goose": "dist/tui.js"
   },
   "files": [
-    "dist",
-    "scripts/postinstall.mjs",
-    "server-binary.json"
+    "dist"
   ],
   "scripts": {
     "build": "tsc",
-    "dev:binary": "node scripts/dev-binary.mjs",
-    "start": "npm run dev:binary && tsx src/tui.tsx",
-    "postinstall": "node scripts/postinstall.mjs",
+    "start": "tsx src/tui.tsx",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
