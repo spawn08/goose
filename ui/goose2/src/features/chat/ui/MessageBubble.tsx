@@ -1,4 +1,4 @@
-import { useState, memo } from "react";
+import { useMemo, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Copy,
@@ -33,10 +33,8 @@ import {
 import { ToolChainCards, type ToolChainItem } from "./ToolChainCards";
 import { ClickableImage } from "./ClickableImage";
 import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHandler";
-import {
-  getMcpAppDescriptor,
-  type McpAppMessageRequest,
-} from "./McpAppToolOutput";
+import type { McpAppMessageRequest } from "./McpAppView";
+import { useHasMcpAppCatalogEntries } from "./mcpAppCatalog";
 import type {
   Message,
   MessageAttachment,
@@ -187,8 +185,9 @@ function groupContentSections(content: MessageContent[]): ContentSection[] {
   return sections;
 }
 
-function hasMcpAppContent(content: MessageContent[]): boolean {
+function getMcpAppCatalogToolNames(content: MessageContent[]): string[] {
   const requestCatalogNames = new Map<string, string>();
+  const toolNames: string[] = [];
 
   for (const block of content) {
     if (block.type === "toolRequest") {
@@ -196,7 +195,7 @@ function hasMcpAppContent(content: MessageContent[]): boolean {
       continue;
     }
 
-    if (block.type !== "toolResponse" || !block.rawOutput) {
+    if (block.type !== "toolResponse") {
       continue;
     }
 
@@ -206,12 +205,12 @@ function hasMcpAppContent(content: MessageContent[]): boolean {
       block.name ??
       "";
 
-    if (toolName && getMcpAppDescriptor(block.rawOutput, toolName)) {
-      return true;
+    if (toolName) {
+      toolNames.push(toolName);
     }
   }
 
-  return false;
+  return toolNames;
 }
 
 function renderContentBlock(
@@ -376,7 +375,15 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   const isUser = role === "user";
-  const hasMcpApp = !isUser && hasMcpAppContent(content);
+  const mcpAppCatalogToolNames = useMemo(
+    () => getMcpAppCatalogToolNames(content),
+    [content],
+  );
+  const hasMcpAppCatalogContent = useHasMcpAppCatalogEntries(
+    isUser ? undefined : sessionId,
+    isUser ? [] : mcpAppCatalogToolNames,
+  );
+  const hasMcpApp = !isUser && hasMcpAppCatalogContent;
   const assistantProviderId = message.metadata?.providerId;
   const assistantProviderName = assistantProviderId
     ? (getCatalogEntry(assistantProviderId)?.displayName ??

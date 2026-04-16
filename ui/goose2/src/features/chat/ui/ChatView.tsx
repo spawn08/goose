@@ -25,7 +25,7 @@ import { getHomeDir } from "@/shared/api/system";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import type { ModelOption } from "../types";
 import { ChatContextPanel } from "./ChatContextPanel";
-import type { McpAppMessageRequest } from "./McpAppToolOutput";
+import type { McpAppMessageRequest } from "./McpAppView";
 
 const EMPTY_MODELS: ModelOption[] = [];
 

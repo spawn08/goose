@@ -29,6 +29,7 @@ import type {
   AcpUsageUpdatePayload,
   AcpReplayCompletePayload,
 } from "./acpStreamTypes";
+import { warmSessionToolsCatalog } from "../ui/mcpAppCatalog";
 
 function getAssistantProviderId(sessionId: string): string | undefined {
   const pending = useChatStore
@@ -516,6 +517,7 @@ export function useAcpStream(enabled: boolean): void {
             event.payload.sessionId,
             event.payload.gooseSessionId,
           );
+        warmSessionToolsCatalog(event.payload.gooseSessionId);
       }),
     );
 

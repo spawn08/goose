@@ -19,7 +19,6 @@ const mockPathExists = vi.fn<(path: string) => Promise<boolean>>();
 const mockOpenResolvedPath = vi.fn<(path: string) => Promise<void>>();
 const mockAcpReadResource = vi.fn();
 const mockAcpGetTools = vi.fn();
-const mockAcpListResources = vi.fn();
 const { mockAppBridgeInstances } = vi.hoisted(() => ({
   mockAppBridgeInstances: [] as Array<Record<string, unknown>>,
 }));
@@ -42,7 +41,6 @@ vi.mock("@/shared/api/acp", async () => {
     ...actual,
     acpReadResource: (...args: unknown[]) => mockAcpReadResource(...args),
     acpGetTools: (...args: unknown[]) => mockAcpGetTools(...args),
-    acpListResources: (...args: unknown[]) => mockAcpListResources(...args),
   };
 });
 
@@ -127,15 +125,14 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     mockOpenResolvedPath.mockReset();
     mockAcpReadResource.mockReset();
     mockAcpGetTools.mockReset();
-    mockAcpListResources.mockReset();
     mockAppBridgeInstances.length = 0;
   });
 
-  it("renders MCP apps inline when lookup falls back from a summarized tool title", async () => {
+  it("renders MCP apps inline when cached tools/list metadata links the canonical tool", async () => {
     mockResolveToolCardDisplay.mockReturnValue(EMPTY_DISPLAY);
     mockAcpGetTools.mockResolvedValue([
       {
-        name: "mcpappbench___mcp_app_bench",
+        name: "mcpappbench__mcp_app_bench",
         _meta: {
           goose_extension: "mcpappbench",
           ui: {
@@ -154,7 +151,7 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     renderAdapter({
       sessionId: "session-summarized-title",
       name: "running mcp app bench tool",
-      catalogName: "running mcp app bench tool",
+      catalogName: "mcpappbench: mcp app bench",
       open: true,
       rawOutput: {
         content: [
@@ -173,6 +170,7 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     });
 
     expect(await screen.findByTestId("mcp-app-frame")).toBeInTheDocument();
+    expect(mockAcpGetTools).toHaveBeenCalledWith("session-summarized-title");
     expect(mockAcpReadResource).toHaveBeenCalledWith(
       "session-summarized-title",
       "ui://mcp-app-bench/launcher",
@@ -180,32 +178,21 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     );
   });
 
-  it("keeps the MCP app path alive when tools/list is briefly unavailable", async () => {
+  it("does not render an MCP app when the matched tools/list entry has no resource URI", async () => {
     mockResolveToolCardDisplay.mockReturnValue(EMPTY_DISPLAY);
-    mockAcpGetTools
-      .mockRejectedValueOnce(new Error("catalog not ready"))
-      .mockResolvedValue([
-        {
-          name: "mcpappbench___mcp_app_bench",
-          _meta: {
-            goose_extension: "mcpappbench",
-            ui: {
-              resourceUri: "ui://mcp-app-bench/launcher",
-            },
-          },
+    mockAcpGetTools.mockResolvedValue([
+      {
+        name: "mcpappbench__mcp_app_bench",
+        _meta: {
+          goose_extension: "mcpappbench",
         },
-      ]);
-    mockAcpReadResource.mockResolvedValue({
-      uri: "ui://mcp-app-bench/launcher",
-      text: "<html><body><h1>MCP App Bench</h1></body></html>",
-      mimeType: "text/html;profile=mcp-app",
-      _meta: null,
-    });
+      },
+    ]);
 
     renderAdapter({
-      sessionId: "session-lookup-retry",
+      sessionId: "session-no-resource-uri",
       name: "running mcp app benchmark suite",
-      catalogName: "running mcp app benchmark suite",
+      catalogName: "mcpappbench: mcp app bench",
       open: true,
       rawOutput: {
         content: [
@@ -223,47 +210,40 @@ describe("ToolCallAdapter — ArtifactActions", () => {
       result: "MCP App Bench launcher loaded.",
     });
 
-    expect(await screen.findByTestId("mcp-app-frame")).toBeInTheDocument();
-    expect(mockAcpGetTools).toHaveBeenCalledTimes(2);
-    expect(mockAcpReadResource).toHaveBeenCalledWith(
-      "session-lookup-retry",
-      "ui://mcp-app-bench/launcher",
-      "mcpappbench",
+    await vi.waitFor(() =>
+      expect(mockAcpGetTools).toHaveBeenCalledWith("session-no-resource-uri"),
     );
+    expect(await screen.findByText("MCP App Bench launcher loaded.")).toBeInTheDocument();
+    expect(screen.queryByTestId("mcp-app-frame")).not.toBeInTheDocument();
+    expect(mockAcpReadResource).not.toHaveBeenCalled();
   });
 
-  it("falls back to extension resources when tool metadata omits the resource URI", async () => {
+  it("does not render an MCP app when no cached tools/list entry matches the catalog tool name", async () => {
     mockResolveToolCardDisplay.mockReturnValue(EMPTY_DISPLAY);
     mockAcpGetTools.mockResolvedValue([
       {
-        name: "mcpappbench___launcher",
+        name: "mcpappbench__different_tool",
         _meta: {
           goose_extension: "mcpappbench",
+          ui: {
+            resourceUri: "ui://mcp-app-bench/launcher",
+          },
         },
       },
     ]);
-    mockAcpListResources.mockResolvedValue({
-      resources: [
-        {
-          uri: "ui://mcp-app-bench/launcher",
-          name: "mcp-app-bench",
-          mimeType: "text/html;profile=mcp-app",
-        },
-      ],
-    });
-    mockAcpReadResource.mockResolvedValue({
-      uri: "ui://mcp-app-bench/launcher",
-      text: "<html><body><h1>MCP App Bench</h1></body></html>",
-      mimeType: "text/html;profile=mcp-app",
-      _meta: null,
-    });
 
     renderAdapter({
-      sessionId: "session-resource-list-fallback",
+      sessionId: "session-no-tool-match",
       name: "running mcp app benchmark",
-      catalogName: "running mcp app benchmark",
+      catalogName: "mcpappbench: mcp app bench",
       open: true,
       rawOutput: {
+        content: [
+          {
+            type: "text",
+            text: "Interactive app available",
+          },
+        ],
         extensionName: "mcpappbench",
         structuredContent: {
           name: "mcp-app-bench",
@@ -272,68 +252,12 @@ describe("ToolCallAdapter — ArtifactActions", () => {
       result: "Interactive app available",
     });
 
-    expect(await screen.findByTestId("mcp-app-frame")).toBeInTheDocument();
-    expect(mockAcpListResources).toHaveBeenCalledWith(
-      "session-resource-list-fallback",
-      "mcpappbench",
+    await vi.waitFor(() =>
+      expect(mockAcpGetTools).toHaveBeenCalledWith("session-no-tool-match"),
     );
-    expect(mockAcpReadResource).toHaveBeenCalledWith(
-      "session-resource-list-fallback",
-      "ui://mcp-app-bench/launcher",
-      "mcpappbench",
-    );
-  });
-
-  it("uses the exact catalog extension name for resource-list fallback", async () => {
-    mockResolveToolCardDisplay.mockReturnValue(EMPTY_DISPLAY);
-    mockAcpGetTools.mockResolvedValue([
-      {
-        name: "axonneighborhood_aharavard___get-restaurants-nearby",
-        _meta: {
-          goose_extension: "axonneighborhood_aharavard_",
-        },
-      },
-    ]);
-    mockAcpListResources.mockResolvedValue({
-      resources: [
-        {
-          uri: "ui://widget/restaurants-widget-5b5f69b9.html",
-          name: "restaurants-widget",
-          mimeType: "text/html;profile=mcp-app",
-        },
-      ],
-    });
-    mockAcpReadResource.mockResolvedValue({
-      uri: "ui://widget/restaurants-widget-5b5f69b9.html",
-      text: "<html><body><h1>Restaurants</h1></body></html>",
-      mimeType: "text/html;profile=mcp-app",
-      _meta: null,
-    });
-
-    renderAdapter({
-      sessionId: "session-exact-extension-name",
-      name: "getting restaurants near new york",
-      catalogName: "axonneighborhood aharavard: get-restaurants-nearby",
-      open: true,
-      rawOutput: {
-        extensionName: "axonneighborhood_aharavard",
-        structuredContent: {
-          name: "restaurants-widget",
-        },
-      },
-      result: "Interactive app available",
-    });
-
-    expect(await screen.findByTestId("mcp-app-frame")).toBeInTheDocument();
-    expect(mockAcpListResources).toHaveBeenCalledWith(
-      "session-exact-extension-name",
-      "axonneighborhood_aharavard_",
-    );
-    expect(mockAcpReadResource).toHaveBeenCalledWith(
-      "session-exact-extension-name",
-      "ui://widget/restaurants-widget-5b5f69b9.html",
-      "axonneighborhood_aharavard_",
-    );
+    expect(await screen.findByText("Interactive app available")).toBeInTheDocument();
+    expect(screen.queryByTestId("mcp-app-frame")).not.toBeInTheDocument();
+    expect(mockAcpReadResource).not.toHaveBeenCalled();
   });
 
   it('renders "Open file" button when primary candidate exists', () => {

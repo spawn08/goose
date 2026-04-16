@@ -16,11 +16,8 @@ import { toolStatusMap } from "../lib/toolStatusMap";
 import type { ToolCallStatus } from "@/shared/types/messages";
 import { useArtifactPolicyContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 import type { ArtifactPathCandidate } from "@/features/chat/lib/artifactPathPolicy";
-import {
-  getMcpAppDescriptor,
-  McpAppToolOutput,
-  type McpAppMessageRequest,
-} from "./McpAppToolOutput";
+import { McpAppView, type McpAppMessageRequest } from "./McpAppView";
+import { useMcpAppCatalogEntry } from "./mcpAppCatalog";
 
 interface ToolCallAdapterProps {
   sessionId?: string;
@@ -232,20 +229,19 @@ export function ToolCallAdapter({
 }: ToolCallAdapterProps) {
   const elapsed = useElapsedTime(status, startedAt);
   const state = toolStatusMap[status];
-  const descriptorToolName = catalogName ?? name;
-  const baseMcpAppDescriptor = useMemo(
-    () =>
-      !isError && rawOutput && sessionId
-        ? getMcpAppDescriptor(rawOutput, descriptorToolName)
-        : null,
-    [descriptorToolName, isError, rawOutput, sessionId],
+  const catalogToolName = catalogName ?? name;
+  const shouldRenderMcpApp = !isError && Boolean(sessionId);
+  const mcpAppCatalogEntry = useMcpAppCatalogEntry(
+    sessionId,
+    catalogToolName,
+    shouldRenderMcpApp,
   );
   const output = (rawOutput ?? result) as ToolOutputProps["output"];
 
   const elapsedSeconds =
     status === "executing" && elapsed >= 3 ? elapsed : undefined;
 
-  if (baseMcpAppDescriptor && sessionId) {
+  if (mcpAppCatalogEntry.entry && sessionId) {
     return (
       <div className="w-full space-y-3">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -257,12 +253,10 @@ export function ToolCallAdapter({
             </span>
           )}
         </div>
-        <McpAppToolOutput
+        <McpAppView
           sessionId={sessionId}
-          toolName={name}
-          catalogToolName={catalogName}
+          catalogEntry={mcpAppCatalogEntry.entry}
           status={status}
-          descriptor={baseMcpAppDescriptor}
           toolInput={args}
           rawOutput={rawOutput}
           resultText={result}

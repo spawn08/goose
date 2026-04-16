@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { ToolCallAdapter } from "./ToolCallAdapter";
-import type { McpAppMessageRequest } from "./McpAppToolOutput";
+import type { McpAppMessageRequest } from "./McpAppView";
 import type {
   ToolRequestContent,
   ToolResponseContent,

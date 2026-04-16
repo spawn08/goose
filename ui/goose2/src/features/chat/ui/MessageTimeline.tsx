@@ -7,7 +7,7 @@ import { getTextContent, type Message } from "@/shared/types/messages";
 import {
   MCP_APP_FRAME_RESIZE_EVENT,
   type McpAppMessageRequest,
-} from "./McpAppToolOutput";
+} from "./McpAppView";
 
 interface MessageTimelineProps {
   sessionId?: string;

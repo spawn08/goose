@@ -16,15 +16,13 @@ import {
 } from "@mcp-ui/client";
 import {
   acpCallTool,
-  acpGetTools,
+  acpListResources,
   acpListPrompts,
   acpListResourceTemplates,
-  acpListResources,
   acpReadResource,
   type AcpCallToolResult,
   type AcpListPromptsResult,
   type AcpListResourceTemplatesResult,
-  type AcpListResourcesResult,
   type AcpReadResourceResponse,
   type AcpToolInfo,
 } from "@/shared/api/acp";
@@ -36,56 +34,20 @@ import { Collapsible, CollapsibleContent } from "@/shared/ui/collapsible";
 import { ToolInput, ToolOutput } from "@/shared/ui/ai-elements/tool";
 import type { ToolCallStatus } from "@/shared/types/messages";
 import { ChevronDown, Server as ServerIcon } from "lucide-react";
+import {
+  extractToolTitle,
+  getCanonicalToolDisplayName,
+  getSessionTools,
+  getToolMetaExtensionName,
+  isToolVisibleToApp,
+  resolveCatalogToolInfo,
+  type McpAppCatalogEntry,
+} from "./mcpAppCatalog";
 
 const MCP_APP_HOST_DEBUG = import.meta.env.DEV;
 const INITIAL_APP_FRAME_HEIGHT = 460;
-const LEGACY_RESOURCE_URI_META_KEY = "ui/resourceUri";
 
 export const MCP_APP_FRAME_RESIZE_EVENT = "goose2:mcp-app-frame-resize";
-
-type LegacyMcpAppOutput = {
-  kind: "mcp_app";
-  mimeType?: string;
-  data?: string;
-};
-
-type StructuredMcpAppOutput = {
-  content?: unknown;
-  extensionName?: string;
-  isError?: boolean;
-  structuredContent?: unknown;
-  _meta?: {
-    ui?: {
-      csp?: AppSandboxCsp;
-      prefersBorder?: boolean;
-      resourceUri?: string;
-    };
-  };
-};
-
-type InlineMcpAppDescriptor = {
-  mode: "inline";
-  html: string;
-  extensionName: string | null;
-};
-
-type ResourceMcpAppDescriptor = {
-  mode: "resource";
-  resourceUri: string;
-  extensionName: string;
-};
-
-type LookupMcpAppDescriptor = {
-  mode: "lookup";
-  extensionName: string;
-  toolName: string;
-  lookupName?: string;
-};
-
-type McpAppDescriptor =
-  | InlineMcpAppDescriptor
-  | ResourceMcpAppDescriptor
-  | LookupMcpAppDescriptor;
 
 type PromptArgument = {
   name: string;
@@ -93,9 +55,7 @@ type PromptArgument = {
   required?: boolean;
 };
 
-const sessionToolsCache = new Map<string, Promise<AcpToolInfo[]>>();
 const resourceCache = new Map<string, Promise<AcpReadResourceResponse>>();
-const LOOKUP_RETRY_DELAYS_MS = [0, 120, 300, 700];
 
 const HOST_APP_INFO = {
   name: "Goose2",
@@ -180,78 +140,6 @@ function logMcpAppHost(message: string, details?: unknown): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function canonicalize(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-
-function deriveExtensionNameFromTitle(toolName: string): string | null {
-  const [prefix] = toolName.split(":");
-  if (!prefix || prefix.trim() === toolName.trim()) {
-    return null;
-  }
-
-  const normalized = prefix
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-
-  return normalized || null;
-}
-
-function extractToolTitle(toolName: string): string {
-  const separatorIndex = toolName.indexOf(":");
-  if (separatorIndex === -1) {
-    return toolName.trim();
-  }
-
-  return toolName.slice(separatorIndex + 1).trim();
-}
-
-function splitCatalogToolName(toolName: string): {
-  extensionName: string;
-  toolName: string;
-} {
-  const separatorIndex = toolName.lastIndexOf("__");
-  if (separatorIndex === -1) {
-    return {
-      extensionName: "",
-      toolName,
-    };
-  }
-
-  return {
-    extensionName: toolName.slice(0, separatorIndex),
-    toolName: toolName.slice(separatorIndex + 2),
-  };
-}
-
-function getToolMetaResourceUri(meta: unknown): string | null {
-  if (!isRecord(meta)) {
-    return null;
-  }
-
-  const ui = meta.ui;
-  if (
-    isRecord(ui) &&
-    typeof ui.resourceUri === "string" &&
-    ui.resourceUri.length > 0
-  ) {
-    return ui.resourceUri;
-  }
-
-  const legacy = meta[LEGACY_RESOURCE_URI_META_KEY];
-  return typeof legacy === "string" && legacy.length > 0 ? legacy : null;
-}
-
-function getToolMetaExtensionName(tool: AcpToolInfo): string | null {
-  if (isRecord(tool._meta) && typeof tool._meta.goose_extension === "string") {
-    return tool._meta.goose_extension;
-  }
-
-  return splitCatalogToolName(tool.name).extensionName || null;
 }
 
 function isPromptArgument(value: unknown): value is PromptArgument {
@@ -350,24 +238,6 @@ function getResourceDocumentHtml(
   return null;
 }
 
-function getToolVisibility(meta: unknown): Set<"model" | "app"> {
-  if (!isRecord(meta) || !isRecord(meta.ui) || !Array.isArray(meta.ui.visibility)) {
-    return new Set(["model", "app"]);
-  }
-
-  const visibility = meta.ui.visibility.filter(
-    (value): value is "model" | "app" => value === "model" || value === "app",
-  );
-
-  return visibility.length > 0
-    ? new Set(visibility)
-    : new Set(["model", "app"]);
-}
-
-function isToolVisibleToApp(tool: AcpToolInfo): boolean {
-  return getToolVisibility(tool._meta).has("app");
-}
-
 function getDefaultFileExtension(mimeType?: string | null): string {
   switch (mimeType) {
     case "text/html":
@@ -443,20 +313,6 @@ function buildInnerIframeAllowAttribute(
   return granted.length > 0 ? granted.join("; ") : undefined;
 }
 
-function getSessionTools(sessionId: string): Promise<AcpToolInfo[]> {
-  const cached = sessionToolsCache.get(sessionId);
-  if (cached) {
-    return cached;
-  }
-
-  const request = acpGetTools(sessionId).catch((error) => {
-    sessionToolsCache.delete(sessionId);
-    throw error;
-  });
-  sessionToolsCache.set(sessionId, request);
-  return request;
-}
-
 function getResourceCacheKey(
   sessionId: string,
   uri: string,
@@ -484,235 +340,6 @@ function getResourceHtml(
   );
   resourceCache.set(cacheKey, request);
   return request;
-}
-
-function invalidateSessionToolsCache(sessionId: string): void {
-  sessionToolsCache.delete(sessionId);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-async function resolveCatalogDescriptor(
-  sessionId: string,
-  descriptor: LookupMcpAppDescriptor,
-): Promise<ResourceMcpAppDescriptor> {
-  const tools = await getSessionTools(sessionId);
-  const targetExtension = canonicalize(descriptor.extensionName);
-  const targetTool = canonicalize(extractToolTitle(descriptor.toolName));
-  const targetLookupName = descriptor.lookupName
-    ? canonicalize(descriptor.lookupName)
-    : null;
-  type CatalogResourceCandidate = {
-    resourceUri: string | null;
-    extensionName: string;
-    catalogTool: string;
-    canonicalTool: string;
-  };
-  const extensionCatalogNames = new Set<string>();
-  const extensionCandidates = tools.flatMap((tool) => {
-    const extensionName = getToolMetaExtensionName(tool);
-    if (!extensionName || canonicalize(extensionName) !== targetExtension) {
-      return [];
-    }
-    extensionCatalogNames.add(extensionName);
-
-    const catalogTool = splitCatalogToolName(tool.name).toolName;
-    const resourceUri = getToolMetaResourceUri(tool._meta);
-    return [
-      {
-        resourceUri,
-        extensionName,
-        catalogTool,
-        canonicalTool: canonicalize(catalogTool),
-      },
-    ];
-  });
-
-  const matchByCanonicalTool = (
-    matcher: string | null,
-  ): ResourceMcpAppDescriptor | null => {
-    if (!matcher) {
-      return null;
-    }
-
-    const matchedCandidate = extensionCandidates.find(
-      (
-        candidate,
-      ): candidate is CatalogResourceCandidate & { resourceUri: string } =>
-        Boolean(candidate.resourceUri) && candidate.canonicalTool === matcher,
-    );
-
-    return matchedCandidate
-      ? {
-          mode: "resource",
-          resourceUri: matchedCandidate.resourceUri,
-          extensionName: matchedCandidate.extensionName,
-        }
-      : null;
-  };
-
-  const exactMatch =
-    matchByCanonicalTool(targetTool) ??
-    matchByCanonicalTool(targetLookupName) ??
-    matchByCanonicalTool(targetExtension);
-
-  if (exactMatch) {
-    return exactMatch;
-  }
-
-  const resourceCandidates = extensionCandidates.filter(
-    (
-      candidate,
-    ): candidate is CatalogResourceCandidate & { resourceUri: string } =>
-      Boolean(candidate.resourceUri),
-  );
-
-  if (resourceCandidates.length === 1) {
-    return {
-      mode: "resource",
-      resourceUri: resourceCandidates[0].resourceUri,
-      extensionName: resourceCandidates[0].extensionName,
-    };
-  }
-
-  const resolvedExtensionName =
-    extensionCatalogNames.size === 1
-      ? Array.from(extensionCatalogNames)[0] ?? descriptor.extensionName
-      : descriptor.extensionName;
-
-  const resourceList = await acpListResources(sessionId, resolvedExtensionName);
-  const appResources = resourceList.resources.filter(
-    (resource) =>
-      resource.mimeType === "text/html;profile=mcp-app" ||
-      resource.uri.startsWith("ui://"),
-  );
-
-  const getResourceMatchers = (resource: AcpListResourcesResult["resources"][number]) =>
-    new Set(
-      [
-        resource.name,
-        resource.uri,
-        ...resource.uri
-          .replace(/^ui:\/\//, "")
-          .split(/[/:_-]+/g)
-          .filter(Boolean),
-      ]
-        .filter((value): value is string => typeof value === "string")
-        .map((value) => canonicalize(value)),
-    );
-
-  const matchResource = (matcher: string | null) => {
-    if (!matcher) {
-      return null;
-    }
-
-    const matchedResource = appResources.find((resource) =>
-      getResourceMatchers(resource).has(matcher),
-    );
-
-    return matchedResource
-      ? {
-          mode: "resource" as const,
-          resourceUri: matchedResource.uri,
-          extensionName: resolvedExtensionName,
-        }
-      : null;
-  };
-
-  const resourceMatch =
-    matchResource(targetTool) ??
-    matchResource(targetLookupName) ??
-    matchResource(targetExtension);
-
-  if (resourceMatch) {
-    return resourceMatch;
-  }
-
-  if (appResources.length === 1) {
-    return {
-      mode: "resource",
-      resourceUri: appResources[0].uri,
-      extensionName: resolvedExtensionName,
-    };
-  }
-
-  throw new Error(
-    `Could not resolve MCP app resource for ${descriptor.extensionName}:${extractToolTitle(descriptor.toolName)}`,
-  );
-}
-
-export async function resolveLookupMcpAppDescriptor(
-  sessionId: string,
-  descriptor: LookupMcpAppDescriptor,
-): Promise<ResourceMcpAppDescriptor | null> {
-  let lastError: unknown = null;
-
-  for (const delayMs of LOOKUP_RETRY_DELAYS_MS) {
-    if (delayMs > 0) {
-      invalidateSessionToolsCache(sessionId);
-      await sleep(delayMs);
-    }
-
-    try {
-      return await resolveCatalogDescriptor(sessionId, descriptor);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  logMcpAppHost("failed to resolve lookup descriptor", {
-    sessionId,
-    descriptor,
-    error:
-      lastError instanceof Error ? lastError.message : String(lastError ?? ""),
-  });
-
-  return null;
-}
-
-async function loadDescriptorAndResource(
-  sessionId: string,
-  descriptor: LookupMcpAppDescriptor | ResourceMcpAppDescriptor,
-): Promise<{
-  descriptor: ResourceMcpAppDescriptor;
-  resource: AcpReadResourceResponse;
-}> {
-  if (descriptor.mode === "resource") {
-    return {
-      descriptor,
-      resource: await getResourceHtml(sessionId, descriptor.resourceUri, descriptor.extensionName),
-    };
-  }
-
-  const resolvedDescriptor = await resolveLookupMcpAppDescriptor(
-    sessionId,
-    descriptor,
-  );
-
-  if (!resolvedDescriptor) {
-    throw new Error(
-      `Could not resolve MCP app resource for ${descriptor.extensionName}:${extractToolTitle(descriptor.toolName)}`,
-    );
-  }
-
-  return {
-    descriptor: resolvedDescriptor,
-    resource: await getResourceHtml(
-      sessionId,
-      resolvedDescriptor.resourceUri,
-      resolvedDescriptor.extensionName,
-    ),
-  };
-}
-
-function getDescriptorExtensionName(
-  descriptor: McpAppDescriptor,
-): string | null {
-  return descriptor.extensionName;
 }
 
 function getFallbackToolResult(
@@ -821,25 +448,17 @@ function normalizeListPromptsResult(
   };
 }
 
-function getCanonicalToolDisplayName(tool: AcpToolInfo): string {
-  return splitCatalogToolName(tool.name).toolName || tool.name;
-}
-
 function normalizeListToolsResult(
   tools: AcpToolInfo[],
   extensionName: string | null,
 ): { tools: HostToolDefinition[] } {
-  const targetExtension = extensionName ? canonicalize(extensionName) : null;
+  const targetExtension = extensionName ?? null;
 
   return {
     tools: tools
       .filter((tool) => {
         const catalogExtension = getToolMetaExtensionName(tool);
-        if (
-          targetExtension &&
-          (!catalogExtension ||
-            canonicalize(catalogExtension) !== targetExtension)
-        ) {
+        if (targetExtension && catalogExtension !== targetExtension) {
           return false;
         }
 
@@ -965,35 +584,6 @@ function getServerIconSrc(meta: unknown): string | null {
         }
       }
     }
-  }
-
-  return null;
-}
-
-async function resolveCatalogToolInfo(
-  sessionId: string,
-  toolName: string,
-  extensionName: string | null,
-): Promise<AcpToolInfo | null> {
-  const tools = await getSessionTools(sessionId);
-  const targetTool = canonicalize(extractToolTitle(toolName));
-  const targetExtension = extensionName ? canonicalize(extensionName) : null;
-
-  for (const tool of tools) {
-    const catalogToolName = canonicalize(getCanonicalToolDisplayName(tool));
-    if (catalogToolName !== targetTool) {
-      continue;
-    }
-
-    const catalogExtension = getToolMetaExtensionName(tool);
-    if (
-      targetExtension &&
-      (!catalogExtension || canonicalize(catalogExtension) !== targetExtension)
-    ) {
-      continue;
-    }
-
-    return tool;
   }
 
   return null;
@@ -1327,67 +917,10 @@ function buildHostStyles(): HostStyles | undefined {
   };
 }
 
-export function getMcpAppDescriptor(
-  rawOutput: unknown,
-  toolName: string,
-): McpAppDescriptor | null {
-  if (!isRecord(rawOutput)) {
-    return null;
-  }
-
-  const legacy = rawOutput as LegacyMcpAppOutput;
-  if (
-    legacy.kind === "mcp_app" &&
-    legacy.mimeType === "text/html;profile=mcp-app" &&
-    typeof legacy.data === "string"
-  ) {
-    return {
-      mode: "inline",
-      html: legacy.data,
-      extensionName: deriveExtensionNameFromTitle(toolName),
-    };
-  }
-
-  const structured = rawOutput as StructuredMcpAppOutput;
-  const resourceUri = structured._meta?.ui?.resourceUri;
-  const lookupName =
-    isRecord(structured.structuredContent) &&
-    typeof structured.structuredContent.name === "string" &&
-    structured.structuredContent.name.length > 0
-      ? structured.structuredContent.name
-      : undefined;
-  const extensionName =
-    typeof structured.extensionName === "string" &&
-    structured.extensionName.length > 0
-      ? structured.extensionName
-      : deriveExtensionNameFromTitle(toolName);
-
-  if (!extensionName) {
-    return null;
-  }
-
-  if (typeof resourceUri !== "string" || resourceUri.length === 0) {
-    return {
-      mode: "lookup",
-      extensionName,
-      toolName,
-      lookupName,
-    };
-  }
-
-  return {
-    mode: "resource",
-    resourceUri,
-    extensionName,
-  };
-}
-
-interface McpAppToolOutputProps {
+interface McpAppViewProps {
   sessionId: string;
-  toolName: string;
-  catalogToolName?: string;
+  catalogEntry: McpAppCatalogEntry;
   status?: ToolCallStatus;
-  descriptor: McpAppDescriptor;
   toolInput: Record<string, unknown>;
   rawOutput?: unknown;
   resultText?: string;
@@ -1396,19 +929,17 @@ interface McpAppToolOutputProps {
   onFrameResize?: () => void;
 }
 
-export function McpAppToolOutput({
+export function McpAppView({
   sessionId,
-  toolName,
-  catalogToolName,
+  catalogEntry,
   status,
-  descriptor,
   toolInput,
   rawOutput,
   resultText,
   isError,
   onMessage,
   onFrameResize,
-}: McpAppToolOutputProps) {
+}: McpAppViewProps) {
   const { resolvedTheme } = useTheme();
   const frameContainerRef = useRef<HTMLDivElement>(null);
   const sandboxFrameRef = useRef<HTMLIFrameElement>(null);
@@ -1420,16 +951,10 @@ export function McpAppToolOutput({
   const pendingInitialFrameHeightRef = useRef<number | null>(null);
   const appInitializedRef = useRef(false);
   const appVisibleRef = useRef(false);
-  const [html, setHtml] = useState<string | null>(
-    descriptor.mode === "inline" ? descriptor.html : null,
-  );
+  const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(descriptor.mode !== "inline");
+  const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState(false);
-  const [catalogTool, setCatalogTool] = useState<AcpToolInfo | null>(null);
-  const [resolvedExtensionName, setResolvedExtensionName] = useState<
-    string | null
-  >(getDescriptorExtensionName(descriptor));
   const [resourceCsp, setResourceCsp] = useState<AppSandboxCsp | undefined>();
   const [resourcePermissions, setResourcePermissions] = useState<
     AppResourcePermissions | undefined
@@ -1444,10 +969,10 @@ export function McpAppToolOutput({
   const [bridgeConnected, setBridgeConnected] = useState(false);
   const [appVisible, setAppVisible] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const sdkToolName = useMemo(
-    () => catalogToolName ?? toolName,
-    [catalogToolName, toolName],
-  );
+  const catalogTool = catalogEntry.tool;
+  const activeExtensionName = catalogEntry.extensionName;
+  const catalogToolName = catalogEntry.catalogToolName;
+  const sdkToolName = catalogEntry.catalogToolName;
 
   useEffect(() => {
     let cancelled = false;
@@ -1466,40 +991,29 @@ export function McpAppToolOutput({
     setAppVisible(false);
     setDetailsOpen(false);
 
-    if (descriptor.mode === "inline") {
-      setHtml(descriptor.html);
-      setResolvedExtensionName(descriptor.extensionName);
-      setResourceCsp(undefined);
-      setResourcePermissions(undefined);
-      setResourcePrefersBorder(undefined);
-      setCatalogTool(null);
-      setError(null);
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     setError(null);
     setHtml(null);
-    setResolvedExtensionName(getDescriptorExtensionName(descriptor));
     setResourceCsp(undefined);
     setResourcePermissions(undefined);
     setResourcePrefersBorder(undefined);
-    setCatalogTool(null);
 
-    void loadDescriptorAndResource(sessionId, descriptor)
-      .then((loaded) => {
+    void getResourceHtml(
+      sessionId,
+      catalogEntry.resourceUri,
+      catalogEntry.extensionName,
+    )
+      .then((resource) => {
         if (cancelled) {
           return;
         }
 
-        setResolvedExtensionName(loaded.descriptor.extensionName);
-        setResourceCsp(getResourceCsp(loaded.resource._meta));
-        setResourcePermissions(getResourcePermissions(loaded.resource._meta));
+        setResourceCsp(getResourceCsp(resource._meta));
+        setResourcePermissions(getResourcePermissions(resource._meta));
         setResourcePrefersBorder(
-          getResourcePrefersBorder(loaded.resource._meta),
+          getResourcePrefersBorder(resource._meta),
         );
-        setHtml(getResourceDocumentHtml(loaded.resource));
+        setHtml(getResourceDocumentHtml(resource));
         setLoading(false);
       })
       .catch((resourceError) => {
@@ -1518,10 +1032,8 @@ export function McpAppToolOutput({
     return () => {
       cancelled = true;
     };
-  }, [descriptor, sessionId]);
+  }, [catalogEntry.extensionName, catalogEntry.resourceUri, sessionId]);
 
-  const activeExtensionName =
-    resolvedExtensionName ?? getDescriptorExtensionName(descriptor);
   const shouldRenderFrameBorder = resourcePrefersBorder !== false;
   const sandboxUrl = useMemo(
     () => new URL("/sandbox_proxy.html", window.location.origin),
@@ -1533,26 +1045,6 @@ export function McpAppToolOutput({
   );
   const hasToolInput = Object.keys(toolInput).length > 0;
   const hasToolResult = Boolean(toolResult || resultText || isError);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    void resolveCatalogToolInfo(sessionId, sdkToolName, activeExtensionName)
-      .then((tool) => {
-        if (!cancelled) {
-          setCatalogTool(tool);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCatalogTool(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeExtensionName, sdkToolName, sessionId]);
 
   useEffect(() => {
     const container = frameContainerRef.current;
