@@ -1263,13 +1263,6 @@ async function main() {
     serverConnection = cli.flags.server;
   } else {
     const binary = resolveGooseBinary();
-    if (!binary) {
-      console.error(
-        "No goose binary found. Use --server <url> or install the native package.",
-      );
-      process.exit(1);
-    }
-
     serverProcess = spawn(binary, ["acp"], {
       stdio: ["pipe", "pipe", "ignore"],
       detached: false,
