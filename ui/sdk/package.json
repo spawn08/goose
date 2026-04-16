@@ -35,6 +35,13 @@
   "peerDependencies": {
     "@agentclientprotocol/sdk": "*"
   },
+  "optionalDependencies": {
+    "@aaif/goose-binary-darwin-arm64": "workspace:*",
+    "@aaif/goose-binary-darwin-x64": "workspace:*",
+    "@aaif/goose-binary-linux-arm64": "workspace:*",
+    "@aaif/goose-binary-linux-x64": "workspace:*",
+    "@aaif/goose-binary-win32-x64": "workspace:*"
+  },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
     "@hey-api/openapi-ts": "^0.92.3",
