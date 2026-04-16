@@ -127,11 +127,9 @@ describe("useChat", () => {
 
     expect(mockAcpSendMessage).toHaveBeenCalledWith(
       "session-1",
-      "goose",
       "Hello",
       {
         systemPrompt: undefined,
-        workingDir: undefined,
         personaId: "persona-b",
         personaName: "Persona B",
         images: undefined,
@@ -316,11 +314,9 @@ describe("useChat", () => {
     expect(mockAcpSendMessage).toHaveBeenNthCalledWith(
       1,
       "session-1",
-      "goose",
       "First",
       {
         systemPrompt: undefined,
-        workingDir: undefined,
         personaId: undefined,
         personaName: undefined,
         images: undefined,
@@ -329,11 +325,9 @@ describe("useChat", () => {
     expect(mockAcpSendMessage).toHaveBeenNthCalledWith(
       2,
       "session-2",
-      "goose",
       "Second",
       {
         systemPrompt: undefined,
-        workingDir: undefined,
         personaId: undefined,
         personaName: undefined,
         images: undefined,
@@ -376,11 +370,9 @@ describe("useChat", () => {
     expect(mockAcpSetModel).toHaveBeenCalledWith("session-1", "gpt-4.1");
     expect(mockAcpSendMessage).toHaveBeenCalledWith(
       "session-1",
-      "openai",
       "Hello",
       {
         systemPrompt: undefined,
-        workingDir: undefined,
         personaId: undefined,
         personaName: undefined,
         images: undefined,
