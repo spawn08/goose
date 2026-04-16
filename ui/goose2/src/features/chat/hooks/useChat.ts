@@ -227,8 +227,6 @@ export function useChat(
           }
         }
 
-        // Send via ACP — response streams back through Tauri events
-        // which are handled by the global useAcpStream listener in AppShell.
         store.setChatState(sessionId, "streaming");
         // When images are present with no text, pass a single space so the ACP
         // driver doesn't send an empty text content block that goose rejects.

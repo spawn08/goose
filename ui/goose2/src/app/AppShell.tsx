@@ -10,7 +10,6 @@ import type { SectionId } from "@/features/settings/ui/SettingsModal";
 import { TopBar } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { useAcpStream } from "@/features/chat/hooks/useAcpStream";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
@@ -18,6 +17,7 @@ import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
 import { AppShellContent } from "./ui/AppShellContent";
 import { acpPrepareSession } from "@/shared/api/acp";
+import { getAndDeleteReplayBuffer } from "@/features/chat/hooks/replayBuffer";
 import { getHomeDir } from "@/shared/api/system";
 import { resolveEffectiveWorkingDir } from "@/features/projects/lib/chatProjectContext";
 
@@ -58,8 +58,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const agentStore = useAgentStore();
   const projectStore = useProjectStore();
 
-  useAcpStream(true);
-
   const pendingProjectCreatedRef = useRef<((projectId: string) => void) | null>(
     null,
   );
@@ -99,6 +97,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           : undefined);
       await acpLoadSession(sessionId, gooseSessionId, workingDir);
       useChatStore.getState().setSessionLoading(sessionId, false);
+      const buffer = getAndDeleteReplayBuffer(sessionId);
+      if (buffer && buffer.length > 0) {
+        useChatStore.getState().setMessages(sessionId, buffer);
+      }
       const t3 = performance.now();
       console.log(
         `[perf:load] ${sessionId.slice(0, 8)} acpLoadSession resolved in ${(t3 - t2).toFixed(1)}ms (total ${(t3 - t0).toFixed(1)}ms)`,

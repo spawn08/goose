@@ -124,7 +124,7 @@ export async function acpSearchSessions(
  * Load an existing session from the goose binary.
  *
  * This triggers message replay via SessionNotification events that the
- * frontend's useAcpStream hook picks up automatically.
+ * notification handler picks up automatically.
  */
 export async function acpLoadSession(
   sessionId: string,
