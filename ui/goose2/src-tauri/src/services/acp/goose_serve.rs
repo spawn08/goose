@@ -1,10 +1,8 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use futures::{SinkExt, StreamExt};
 use tokio::process::{Child, Command};
 use tokio::sync::OnceCell;
-use tokio_tungstenite::connect_async;
 
 const GOOSE_SERVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const GOOSE_SERVE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
@@ -95,9 +93,7 @@ impl GooseServeProcess {
             )
         })?;
 
-        // Wait for the server to become ready by polling the WebSocket endpoint.
-        let ws_url = format!("ws://{LOCALHOST}:{port}/acp");
-        wait_for_server_ready(&ws_url, &mut child).await?;
+        wait_for_server_ready(port, &mut child).await?;
 
         log::info!("Goose serve is ready on port {port}");
 
@@ -108,22 +104,14 @@ impl GooseServeProcess {
     }
 }
 
-/// Wait for the goose serve process to accept WebSocket connections.
-///
-/// We do a connect-then-immediately-close loop until the server responds,
-/// the child exits, or we time out.
-async fn wait_for_server_ready(ws_url: &str, child: &mut Child) -> Result<(), String> {
+async fn wait_for_server_ready(port: u16, child: &mut Child) -> Result<(), String> {
     let deadline = Instant::now() + GOOSE_SERVE_CONNECT_TIMEOUT;
+    let addr = format!("{LOCALHOST}:{port}");
 
     loop {
-        match connect_async(ws_url).await {
-            Ok((ws_stream, _)) => {
-                // Server is up — close the probe connection.
-                let (mut writer, _) = ws_stream.split();
-                let _ = writer.close().await;
-                return Ok(());
-            }
-            Err(connect_error) => {
+        match tokio::net::TcpStream::connect(&addr).await {
+            Ok(_) => return Ok(()),
+            Err(_) => {
                 if let Some(status) = child
                     .try_wait()
                     .map_err(|e| format!("Failed to poll goose serve process: {e}"))?
@@ -135,7 +123,7 @@ async fn wait_for_server_ready(ws_url: &str, child: &mut Child) -> Result<(), St
 
                 if Instant::now() >= deadline {
                     return Err(format!(
-                        "Timed out waiting for goose serve at {ws_url}: {connect_error}"
+                        "Timed out waiting for goose serve on port {port}"
                     ));
                 }
 
